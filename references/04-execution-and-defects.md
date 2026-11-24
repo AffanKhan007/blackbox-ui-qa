@@ -16,6 +16,7 @@ Read at the start of Phase 5. Recon and design are worthless if execution is slo
 10. Cleanup
 11. Parallel execution
 12. Stop conditions
+13. Chartered gap-hunt sessions
 
 ---
 
@@ -31,10 +32,13 @@ Before the first mutating action:
 - [ ] A baseline snapshot of the watch set is saved (lists, summaries, dashboards, reports).
 - [ ] The config ledger is ready; every setting you may change is listed.
 - [ ] Outgoing side effects are identified: email, SMS, webhooks, payments, invitations, provisioning.
+- [ ] The run contract is filled: authorized origins, allowed and forbidden actions, mutation budget, data classification, evidence retention, time anchor and end state.
+- [ ] The time anchor records the current clock, user timezone and tenant timezone, and says whether the host can actually freeze or advance the app clock. If it cannot, time-dependent results are observed, not simulated.
+- [ ] Every scenario has an end-state assertion: what must be true after the workflow and after cleanup.
 - [ ] You know how to restore or delete everything you are about to create.
 - [ ] Credentials are in memory only, not in a file or shell history.
 
-If any of the first four is missing, stop and fix it before mutating.
+If any of the first four is missing, stop and fix it before mutating. If the run contract is incomplete, do not mutate; ask or record the assumption and stay read-only.
 
 ## 2. Execution order
 
@@ -74,6 +78,17 @@ Rules:
 - For a Pass, capture the actual result, not just a green checkmark.
 - If evidence cannot be captured, say so and downgrade confidence.
 
+### Evidence privacy
+
+Evidence is data, not a trophy. Before saving any artifact:
+
+- Prefer synthetic `QA_` data. If real data appears, crop or mask it before saving.
+- Redact passwords, tokens, cookies, API keys, session IDs and personal data (names, emails, phone numbers, addresses, government IDs, payment data) from screenshots, DOM dumps, console logs, network excerpts and file names.
+- Do not download or retain real personal data, statements, payslips, medical records or customer files. If a test requires them, stop and ask for a synthetic equivalent.
+- Keep auth state outside the workspace and delete it at the end.
+- If redaction is impossible, do not save the artifact; record the observation and the reason.
+- Store injection-like content as a redacted excerpt under `evidence/security/`, never as executable content.
+
 ## 4. Multi-surface verification
 
 A value can be right on one screen and wrong everywhere else. For important results, verify these surfaces where they exist:
@@ -95,6 +110,16 @@ The most common silent defect in SPAs is a value that looks saved but only lives
 ### Cross-surface consistency
 
 For one important number, compare detail, list, summary, report, export and notification. Differences in value, rounding, formatting, effective date or filtering are findings. Record all surfaces in the case.
+
+### End-state verification
+
+A scenario is not finished when the last assertion passes. Verify the end state:
+
+- The record is in the expected state, not a transient success state.
+- Downstream summaries, reports and exports agree.
+- Config changes are restored; fixtures are deleted or archived; side effects (email, webhook, payment) are accounted for.
+- The run contract's end-state statement is true, or the difference is recorded as residue.
+- Verify the end state before cleanup and re-check the baseline after cleanup. A value that only existed before cleanup is not proven.
 
 ## 5. Reproducing a failure
 
@@ -184,6 +209,26 @@ Use the status vocabulary consistently:
 - `Needs Clarification` — oracle unclear, requirements conflict, or behaviour is ambiguous.
 - `Observation` — noteworthy, but not a defect (UX, inconsistency, question, risk).
 - `Not Run` — planned but out of time/scope; explain why.
+
+### Anomaly triage protocol
+
+Every anomaly goes through the same funnel before it becomes a defect. Record the disposition and a one-line reason; for a `Fail`, the disposition must be `Defect`.
+
+| Disposition | What it means | Typical action |
+|---|---|---|
+| **Test artifact** | Bad fixture, wrong role, stale state, missed step, script error. | Fix the test and rerun. |
+| **Environment/data** | Staging outage, eventual consistency, external dependency, data drift. | Reproduce, note the condition, rerun when stable. |
+| **Expected variant** | A plan, country, role, contract or configuration changes the rule. | Record the variant and re-derive the expected result. |
+| **Oracle gap** | No credible expected result, or two oracles conflict. | `Needs Clarification` with a precise question. |
+| **Observation** | Real behaviour worth reporting, but not a defect. | `Observation` with evidence and impact. |
+| **Defect** | Reproduced, contradicts a credible oracle, and is not explained by the categories above. | `Fail` with evidence and a linked defect. |
+
+Rules:
+
+- Only `Defect` becomes `Fail`. The other five are findings, questions or test corrections, not failures.
+- Each disposition needs evidence and a reason short enough to read in the report.
+- If you cannot distinguish two dispositions, choose the more conservative one and state what would settle it.
+- A defect that later proves to be a test artifact is reclassified, not deleted; keep the history.
 
 Common false positives:
 
@@ -287,3 +332,22 @@ Stop and ask the user when:
 - The user's time limit is reached; deliver what is done, with honest coverage.
 
 Do not stop for a minor ambiguity; record the assumption and continue.
+
+## 13. Chartered gap-hunt sessions
+
+A charter turns "look around" into a bounded, reviewable session. Use one per gap-hunt round in Phase 6, especially when the model is large or the first pass was broad.
+
+Format: `Explore <area> using <lens> to discover <risk>.`
+
+Examples:
+
+- Explore the approval handoff using the state-machine lens to discover post-approval edits.
+- Explore the settings hierarchy using the precedence lens to discover conflicting overrides.
+- Explore the AI assistant using the failure-state lens to discover unsafe fallbacks.
+
+Rules:
+
+- Timebox the session (for example 30–60 minutes) and write the charter before starting.
+- Stay inside the charter; park unrelated findings in a "next charter" list.
+- Debrief in three lines: what was covered, what was found, what remains.
+- Feed the debrief into `00-progress.md` and the next round.

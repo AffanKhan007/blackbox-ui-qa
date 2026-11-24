@@ -13,6 +13,7 @@ Read at the start of Phase 2 (atlas) and Phase 3 (model). The atlas answers "wha
 7. Fixtures: designing the cast of test entities
 8. Risk ranking
 9. Modeling anti-patterns
+10. Feature-complete configuration
 
 ---
 
@@ -166,6 +167,12 @@ Use the strongest available oracle, and record which one you used:
 
 If two oracles conflict, say so in `Needs Clarification`. The conflict itself is a valuable finding.
 
+### Oracle completeness
+
+The hierarchy ranks oracles; it does not generate them. When there is no specification, or when a high-impact output has only one oracle, use the **FEW HICCUPPS** families as prompts: Familiarity, Explainability, World, History, Image, Comparable products, Claims, Users' desires, Product, Purpose, Standards and statutes. The full question set is in `03-test-design-catalog.md` §2.
+
+For any high-impact output (money, legal, access, irreversible action), name at least three families and record them in the case's oracle. One family is a hypothesis, not a verdict. FEW HICCUPPS generates candidates; the hierarchy still decides how much weight each one carries.
+
 ## 6. Scenario synthesis
 
 Scenarios are what turn a pile of field tests into depth. Build them by combining the model with the lenses in `03-test-design-catalog.md` and write them as cards in `04-scenarios.md`:
@@ -179,6 +186,7 @@ SC-021  "Mid-month joiner with an unpaid-leave week and a loan"
   Risk:     money, compliance
   Touches:  Employees, Leave, Loans, Payroll, Reports
   Expected: net pay = independently computed value; loan deduction <= 30% of net
+  End state: run finalised or reversed per scope; QA_ fixtures removed; config restored
 ```
 
 Good scenarios cross at least two modules, put the product in an uncomfortable position (boundaries, conflicts, reversals, lateness, volume), and have a checkable oracle. Generate them systematically:
@@ -187,6 +195,8 @@ Good scenarios cross at least two modules, put the product in an uncomfortable p
 - For each state machine, walk every transition and a few illegal ones.
 - For each output, ask who consumes it and what would embarrass the business if wrong.
 - For each role, ask what they should never see or do.
+- For each cycle, period, batch or approval stage, ask what must carry forward, reverse or reconcile.
+- State the end state: the record status, downstream totals, restored config, cleaned fixtures and external side effects that must be true when the scenario is finished. A scenario without an end state cannot prove cleanup.
 
 ## 7. Fixtures: designing the cast of test entities
 
@@ -195,15 +205,27 @@ The product may need entities you do not have: new employees, customers, product
 1. List the **partitions** that matter (employment types, plan tiers, tax categories, currencies, locations, product types, roles, statuses).
 2. Create the **smallest cast** that covers each partition at least once, plus boundary members (the joiner on the last day of the month, the order of exactly the free-shipping threshold, the salary exactly at a slab edge).
 3. Name them `QA_<module>_<nn>_<what-they-represent>`, so purpose and ownership are obvious and cleanup is easy.
-4. Record each in `07-fixtures-and-config-ledger.json` (id, name, purpose, where created, status, cleanup plan).
+4. Record each in `07-fixtures-and-config-ledger.json` (id, name, purpose, design, where created, status, cleanup plan, end state).
 5. Create them in dependency order (reference data first, then the entities that use it). Creating them through the UI is itself a test: log any problems as results, not as setup noise.
 6. Keep one pristine "control" entity that you never alter, as a baseline for comparison.
 7. Plan teardown now: which can be deleted, which only archived, which cannot be removed (note those for the user).
 
 If the app has roles, create or request one account per role so permission tests are real. If creating users would send real invitations, stop and ask.
 
+### Dual fixture strategy
+
+Use two kinds of subject, plus a control:
+
+- **Stacked subject** — one entity that carries several relevant attributes at once (for example a mid-month joiner, on a probation contract, in a non-default department, with a loan and an approved unpaid-leave week). Use it to expose interactions and make scenarios realistic. It is efficient for coverage, but it cannot tell you which attribute caused a failure.
+- **Isolate subject** — a near-identical entity that differs in one attribute only. Use it to confirm or reject a suspected cause after a stacked subject fails. If the isolate also fails, the cause is broader than the attribute you changed.
+- **Control subject** — an untouched baseline that shares the same environment and timing. Use it to distinguish a real change from drift, caching or another actor's edits.
+
+Start with stacked subjects for scenario coverage. When something fails, create or reuse an isolate subject before writing the defect. Record which subject each case used; a failure found on a stacked subject and confirmed on an isolate subject is far stronger evidence than either alone.
+
 ### Fixture design patterns
 
+- **Stacked subject**: many relevant attributes combined, for interaction and realism.
+- **Isolate pair**: two records identical except for one attribute, to confirm which attribute changes behaviour.
 - **Boundary twin**: two records either side of a threshold (99.99 and 100.00).
 - **Control**: untouched baseline for diffing.
 - **State ladder**: the same entity cloned into each lifecycle state.
@@ -242,6 +264,23 @@ Record the rationale in the test case. "P0 because payroll net pay" is useful; "
 - **Treating a setting's label as its behaviour.** Labels lie; perturb and observe.
 - **Ignoring "no change".** A setting that does nothing may be dormant or broken.
 - **One giant fixture.** It hides which attribute caused the effect.
+- **Stacked-fixture diagnosis.** A many-attribute subject can find an interaction but cannot explain it; confirm with an isolate subject.
+- **"Everything on" as coverage.** A maximum configuration may be invalid and can still miss branches; use a valid feature-complete profile.
 - **Changing several settings at once.** You lose the causal edge.
 - **Forgetting to restore.** The next test inherits a contaminated baseline.
 - **Confusing a UI hide with a server permission.** Verify with a role that should be blocked; observe the UI-generated response, do not craft requests.
+
+## 10. Feature-complete configuration
+
+Settings, flags, plans, roles and locales are where deep defects hide, but "turn everything on" is not a test: some combinations are invalid, some are unsafe, and many are equivalent.
+
+Build a **feature-complete configuration matrix**:
+
+1. **Inventory the switches.** List every setting, feature flag, plan tier, role, locale and tenant-level option that can change behaviour. Exclude cosmetic-only options and say why.
+2. **Map each option to the branch it changes.** For each setting, record its options and the behaviour, field, calculation, permission or output that differs. An option with no observable branch is a finding or a dormant feature, not coverage.
+3. **Choose a valid feature-complete profile.** Select one valid value per setting so that every behaviour branch is exercised at least once across the profile. This is not the maximum value of every setting; it is the smallest valid combination that reaches every branch.
+4. **Reduce interactions with pairwise.** For settings that interact, use pairwise combinations (see `03-test-design-catalog.md`) rather than the full Cartesian product. Add explicit cases for known dangerous pairs.
+5. **Record the matrix.** Put it in `07-fixtures-and-config-ledger.json` under `configuration_matrix`, with the option set, the branch, the profile value, and the case or reason. The report shows it on Test Data & Config.
+6. **Restore the profile.** Every non-default value is a config change in the ledger. A feature-complete profile is a test fixture, not a new baseline.
+
+If the product has plans or entitlements you cannot obtain, record the missing branches as limitations. Do not simulate an entitlement by editing the UI or bypassing a flag.

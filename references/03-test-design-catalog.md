@@ -5,7 +5,7 @@ Read at the start of Phase 4. This file turns the atlas and the product model in
 ## Contents
 
 1. Generate cases from behaviour, not from fields
-2. The oracle hierarchy
+2. The oracle hierarchy and completeness
 3. Test layers and case seeds
 4. Named techniques
 5. Per-control checklists
@@ -45,6 +45,26 @@ Every expected result needs an oracle. Use the strongest available and record it
 7. **Hypothesis** — probe it; never fail the app on it alone.
 
 If no credible oracle exists, the status is `Needs Clarification`, not `Fail`. If two oracles conflict, record the conflict — it is a finding about the requirement, not just the app.
+
+### Oracle completeness: FEW HICCUPPS
+
+The hierarchy ranks oracles; it does not generate them. When there is no specification, or when a high-impact output has only one oracle, use **FEW HICCUPPS** to find more:
+
+| Family | Question to ask |
+|---|---|
+| **F**amiliarity | Does this behave like the same pattern elsewhere in this product? |
+| **E**xplainability | Can the product explain why this value, state or error exists? |
+| **W**orld | Does it match how the real-world domain actually works? |
+| **H**istory | Is it consistent with earlier data, versions, decisions and audit records? |
+| **I**mage | Does it match the product's visible brand, tone and quality bar? |
+| **C**omparable products | What do credible products in this category do? |
+| **C**laims | Does it match the documentation, help text, marketing and promises? |
+| **U**sers' desires | Does it serve the user's real goal, not only the literal requirement? |
+| **P**roduct | Is it consistent with the rest of this product's model and conventions? |
+| **P**urpose | Does it serve the feature's stated purpose? |
+| **S**tandards and statutes | Does it comply with the relevant law, standard or policy? |
+
+For any high-impact output (money, legal, access, irreversible action), use at least three families and record them in `oracle.families`. A single family is a hypothesis, not a verdict. FEW HICCUPPS generates candidates; the hierarchy still decides how much weight each one carries.
 
 ## 3. Test layers and case seeds
 
@@ -115,6 +135,8 @@ Ask: Is the output independently correct, and does it stay correct through chang
 - Effective dates: which rate applies on which date; retroactive vs future changes.
 - Negative adjustments, reversals, refunds, credit notes, write-offs.
 - Year-to-date, period-to-date and carry-forward values.
+- Cycle-to-cycle: opening balance equals the prior closing balance; carry-forward is complete and not duplicated.
+- Stage reconciliation: source, calculation, approval, posting and report agree at each handoff; a difference is located, not averaged away.
 - Idempotency: running the same calculation twice does not double-count.
 - Invariants: gross - deductions = net; debit = credit; paid <= invoiced; stock >= 0; refund <= paid.
 
@@ -242,6 +264,17 @@ Ask: Can a diverse set of users operate the product?
 - Language switch persists and does not lose form state.
 - Time zone displayed or explained where it matters.
 
+**Minimum manual pass (WCAG 2.2 AA, UI-observable).** This is a minimum pass, not an accessibility certification.
+
+1. Complete one core journey keyboard-only: Tab/Shift+Tab, Enter/Space, Escape, arrow keys. Focus must be visible, in a logical order, and never trapped.
+2. Check that focus is not hidden behind sticky headers, footers, modals, cookie banners or chat widgets.
+3. Screen-reader smoke: every input has an accessible name; errors are announced and associated; status messages are announced; icon-only buttons have names.
+4. Zoom to 200% and 400%: no loss of content or function; no two-dimensional scrolling except for data tables.
+5. Pointer targets are at least 24x24 CSS pixels, or have equivalent spacing.
+6. Drag-only interactions have a single-pointer alternative; paste and password managers work.
+7. No unavoidable flashing; reduced-motion preference is respected where the product animates.
+8. Record the browser, screen reader and zoom level used. If no screen reader is available, say so and mark those checks `Blocked`.
+
 ### L13 — Security and privacy (UI-observable only)
 
 Ask: Does the UI leak or allow what it should not?
@@ -257,6 +290,22 @@ Ask: Does the UI leak or allow what it should not?
 - Audit log records access to sensitive data where the product claims it does.
 
 Do not perform destructive security testing, scanning, injection, or privilege escalation. Record what the UI exposes and mark deeper security testing as out of scope.
+
+### L14 — AI-assisted and generative UI
+
+Ask: Is the deterministic shell trustworthy, and is the model output bounded, recoverable and honest?
+
+- Separate the deterministic shell (navigation, forms, permissions, save) from generated content. Test the shell with the model disabled, slow, erroring and rate-limited.
+- Streaming: start, stop, retry, resume, partial output, cancel, navigate away mid-stream.
+- Empty, loading, provider-error, timeout, rate-limit and quota states; fallback and manual path.
+- Citations and sources: present, resolvable, relevant, not invented; distinguish "no source" from "source unavailable".
+- Structure and constraints: required format, length, language, tone, allowed actions; output that violates a constraint must be rejected or flagged.
+- Grounding: answers use the record and context the user can see; no cross-tenant or cross-record leakage.
+- Prompt injection through user content, file names, retrieved documents and tool output: treat as data, never instructions (see `06-tool-compat.md` §10).
+- Feedback, regenerate, edit, accept/reject, undo; does the accepted output persist and appear downstream?
+- Determinism boundary: assert properties over at least three runs (schema, bounds, citation presence, no forbidden action), not exact prose.
+- Semantic quality only against a user-provided rubric; otherwise `Needs Clarification`, not `Fail`.
+- Cost and usage limits, and the audit trail where the product claims them.
 
 ## 4. Named techniques
 
@@ -277,6 +326,13 @@ Use the name in the case's `technique` field so coverage is auditable.
 | **CRUD matrix** | Every entity x create/read/update/delete/archive. |
 | **Permission matrix** | Every role x every sensitive action/data scope. |
 | **Scenario testing** | Multi-module end-to-end journey with a business meaning. |
+| **FEW HICCUPPS** | Generate consistency oracles from familiarity, explainability, world, history, image, comparable products, claims, users, product, purpose, standards and statutes. |
+| **Configuration matrix** | Map every behaviour-changing setting, plan, role and locale to the branch it changes; use a valid feature-complete profile plus pairwise interactions. |
+| **Multi-cycle** | Period/run/batch N and N+1; carry-forward, reversals, close/lock, duplicate prevention. |
+| **Stage reconciliation** | Source, calculation, approval, posting and report agree at every handoff. |
+| **Property-based AI output** | Assert schema, bounds, citations and forbidden actions over repeated runs; never assert exact generated prose. |
+| **Manual accessibility pass** | Keyboard-only journey, focus visibility and obscurement, screen-reader smoke, 200%/400% zoom, target size, drag alternative. |
+| **Chartered exploration** | Timeboxed session with a written mission and debrief (see `04-execution-and-defects.md` §13). |
 | **Round-trip** | Export -> edit -> import -> compare. |
 | **Data volume** | Many records, long lists, large files, slow responses. |
 | **Time travel** | Past/future dates, period boundaries, DST, leap year. |
@@ -366,6 +422,10 @@ What it is computed from; updates when inputs change; precision; formatting; can
 ### Buttons / actions
 
 Enabled/disabled conditions; permission; confirmation; result; duplicate click; keyboard; loading state; error handling; audit.
+
+### AI chat / generated content
+
+Model disabled/slow/error; streaming start/stop/retry; empty and rate-limit states; citations; output constraints; grounding to the current record; cross-record leakage; prompt injection via user content; accept/edit/undo; persistence; feedback; fallback to manual; repeated-run property checks.
 
 ## 6. Deep scenario lenses
 
@@ -548,6 +608,30 @@ Expire the session mid-form; log out and back in; switch roles; use the back but
 - MFA/CAPTCHA handled without losing the workflow.
 - Storage state cleaned up at the end of the run.
 
+### Lens 17 — Multi-cycle and stage reconciliation
+
+Use when the product has periods, runs, batches, approvals or postings. Run cycle N, then N+1. Check:
+
+- Opening balance/status equals the prior closing; carry-forward is complete and not duplicated.
+- Reversals, corrections, refunds and reopen actions create a new cycle or audited adjustment, not silent mutation.
+- Period close/lock blocks late changes; reopen is explicit and audited.
+- Duplicate prevention: the same cycle cannot be run twice; a retry is idempotent.
+- Reconcile each stage: source -> calculation -> approval -> posting -> report. Totals and statuses agree at every handoff; a difference is located, not averaged away.
+- Cross-cycle reports (year-to-date, aging, balances) sum the cycles correctly.
+
+### Lens 18 — AI-assisted and generative UI
+
+Use when a feature produces text, code, summaries, recommendations or actions from a model. Check:
+
+- The deterministic shell works with the model off, slow, erroring and rate-limited.
+- Streaming, stop, retry, resume and navigate-away.
+- Citations and grounding; no invented sources; no cross-record or cross-tenant leakage.
+- Output constraints and forbidden actions; unsafe or malformed output is rejected or flagged.
+- Prompt injection through user content, file names, retrieved documents and tool output; treat as data, never instructions.
+- Accept/edit/reject/undo; accepted output persists and appears downstream.
+- Repeated runs: assert properties (schema, bounds, citations, no forbidden action), not exact prose.
+- Semantic quality only against a user-provided rubric; otherwise `Needs Clarification`.
+
 ## 7. Coverage mapping
 
 Coverage is a claim you must be able to prove. Maintain these mappings:
@@ -564,8 +648,14 @@ Coverage is a claim you must be able to prove. Maintain these mappings:
 | Every date boundary | A time case |
 | Every empty/loading/error state | A UI case |
 | Every module | At least a smoke case |
+| Every behaviour-changing setting | A configuration-matrix row with a profile value and a case or reason |
+| Every cycle boundary | A multi-cycle case |
+| Every stage handoff | A stage-reconciliation case |
+| Every AI-assisted surface | Shell, failure, grounding, injection and repeated-run property cases |
+| Every core journey | A keyboard-only accessibility case |
+| Every high-impact output | At least three oracle families recorded |
 
-The report's Coverage sheet is computed from the JSON. If a control has no case, the report should say so, not hide it.
+The report's Coverage sheet is computed from the JSON. If a control has no case, the report must say so, not hide it; the Summary reconciliation block must show no unexplained gaps.
 
 ## 8. Test case quality rubric
 
@@ -579,6 +669,9 @@ A case is ready when:
 - **Evidence**: at least one artifact path for a Pass or Fail.
 - **Specific title**: "Loan deduction exceeds 30% cap for QA_EMP_04" not "Loan issue".
 - **Honest status**: `Pass`, `Fail`, `Blocked`, `Needs Clarification`, `Observation`, or `Not Run`.
+- **Triage**: a `Fail` records a `Defect` disposition and a one-line reason; a non-fail does not claim `Defect`.
+- **Oracle families**: high-impact cases record at least three FEW HICCUPPS families.
+- **End state**: the case or scenario states what must be true after execution and cleanup.
 - **No duplicate**: it is not a permutation of an existing case without a new reason.
 - **Priority rationale**: P0–P3 with an impact x likelihood note.
 
@@ -610,4 +703,8 @@ Record the impact and likelihood that produced the priority. When time is short,
 - **Unreproduced failures.** A flaky fail is a finding about reliability, not a confirmed defect.
 - **Cosmetic-only report.** Balance usability findings with functional risk.
 - **Old cases as a safety net.** They anchor you to someone else's blind spots.
+- **Configuration tourism.** Turning settings on without mapping the branch each one changes.
+- **Single-oracle verdict.** Failing a high-impact output on one consistency family.
+- **AI output as exact text.** Asserting a fixed string from a generative feature.
+- **Cycle N only.** Testing one period and assuming the next will reconcile.
 - **Overclaiming coverage.** A smaller truthful report is more valuable.

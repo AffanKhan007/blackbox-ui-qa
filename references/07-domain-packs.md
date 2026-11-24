@@ -12,6 +12,7 @@ Read the pack that matches what you see in Phase 1, and several if the product s
 6. Ticketing and support
 7. Scheduling and booking
 8. Cross-domain invariants
+9. Cross-cutting seeds (all packs)
 
 ---
 
@@ -337,3 +338,30 @@ These hold in almost every business product and are cheap, high-value oracles:
 - **Locale coherence**: numbers, dates and currency are formatted and interpreted consistently.
 
 When you find a violation, check whether it is a display issue, a calculation issue, a persistence issue, or a permission issue. The fix and severity differ.
+
+## 9. Cross-cutting seeds (all packs)
+
+Use these seeds when the product has the relevant surface. They are not a new vertical.
+
+### Multi-cycle and stage reconciliation
+
+- Run period/run/batch N and N+1; opening equals prior closing; carry-forward is complete and not duplicated.
+- Reversals, corrections, refunds and reopen actions create a new cycle or audited adjustment, not silent mutation.
+- Period close/lock blocks late changes; reopen is explicit and audited.
+- Duplicate prevention: the same cycle cannot be run twice; a retry is idempotent.
+- Reconcile source, calculation, approval, posting and report at each handoff.
+
+### AI-assisted and generative UI
+
+- Assistant/chat/copilot: model disabled, slow, error and rate-limit; streaming stop/retry; citations; grounding; cross-record leakage; prompt injection via user content and retrieved documents; accept/edit/undo; fallback.
+- Generated summaries, recommendations and actions: constraints, forbidden actions, persistence, downstream use, audit.
+- Repeated runs: assert properties (schema, bounds, citations, no forbidden action), not exact prose. Semantic quality only with a user-provided rubric.
+
+### Accessibility minimum manual pass
+
+- Keyboard-only core journey; focus visible and not obscured; no traps; screen-reader smoke; 200%/400% zoom; 24x24 target size; drag alternative; paste/password managers.
+- Record the browser, screen reader and zoom level; if unavailable, mark `Blocked`.
+
+### Configuration and fixtures
+
+- Feature-complete configuration profile; pairwise interactions; stacked subject for coverage, isolate subject for diagnosis, control for baseline.

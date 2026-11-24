@@ -40,6 +40,7 @@ CATEGORIES = [
     "Resilience & Concurrency",
     "Accessibility & Locale",
     "Security & Privacy",
+    "AI-Assisted UI",
     "Other",
 ]
 
@@ -88,6 +89,41 @@ CONFIDENCES = ["High", "Medium", "Low"]
 
 QUESTION_TYPES = ["Question", "Assumption", "Limitation", "Not Tested", "Conflict"]
 
+TRIAGE_DISPOSITIONS = [
+    "Test artifact",
+    "Environment/data",
+    "Expected variant",
+    "Oracle gap",
+    "Observation",
+    "Defect",
+]
+
+FIXTURE_DESIGNS = [
+    "stacked",
+    "isolate",
+    "control",
+    "boundary",
+    "state",
+    "volume",
+    "role",
+    "retroactive",
+    "other",
+]
+
+ORACLE_FAMILIES = [
+    "Familiarity",
+    "Explainability",
+    "World",
+    "History",
+    "Image",
+    "Comparable products",
+    "Claims",
+    "Users' desires",
+    "Product",
+    "Purpose",
+    "Standards and statutes",
+]
+
 CONTROLS = [
     "text",
     "textarea",
@@ -126,6 +162,7 @@ ARTIFACTS = {
     "defects": ("06-defects.json", "defects"),
     "fixtures": ("07-fixtures-and-config-ledger.json", "fixtures"),
     "config_changes": ("07-fixtures-and-config-ledger.json", "config_changes"),
+    "configuration_matrix": ("07-fixtures-and-config-ledger.json", "configuration_matrix"),
     "questions": ("08-open-questions.json", "items"),
 }
 
@@ -203,11 +240,14 @@ def oracle_text(value: Any) -> str:
         kind = as_text(value.get("type"))
         source = as_text(value.get("source"))
         confidence = as_text(value.get("confidence"))
+        families = as_text(value.get("families"))
         description = as_text(value.get("description"))
         parts = [p for p in [kind, source] if p]
         text = " — ".join(parts) if parts else ""
         if confidence:
             text = f"{text} ({confidence})" if text else f"({confidence})"
+        if families:
+            text = f"{text} [families: {families}]" if text else f"[families: {families}]"
         if description:
             text = f"{text}: {description}" if text else description
         return text
@@ -292,6 +332,27 @@ def _enum(record: dict, field: str, allowed: list, kind: str, ref: str, issues: 
                 ref,
             )
         )
+
+
+def _string_list(record: dict, field: str, kind: str, ref: str, issues: list, required: bool = False) -> list[str]:
+    value = record.get(field)
+    if value in (None, ""):
+        if required:
+            issues.append(_issue("error", "missing_field", f"{kind} {ref} is missing required field '{field}'", ref))
+        return []
+    if not isinstance(value, list):
+        issues.append(_issue("error", "bad_list", f"{kind} {ref} field '{field}' must be a list.", ref))
+        return []
+    cleaned = []
+    for item in value:
+        text = as_text(item)
+        if not text:
+            issues.append(_issue("error", "bad_list", f"{kind} {ref} field '{field}' contains an empty value.", ref))
+        else:
+            cleaned.append(text)
+    if required and not cleaned:
+        issues.append(_issue("error", "missing_field", f"{kind} {ref} is missing required field '{field}'", ref))
+    return cleaned
 
 
 def _evidence_paths(value: Any) -> list[str]:
@@ -450,12 +511,93 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
         if not as_text(meta.get("url")):
             issues.append(_issue("warning", "missing_meta", "meta.json is missing 'url'"))
 
+        in_scope = meta.get("in_scope_modules")
+        if in_scope is not None:
+            _string_list(meta, "in_scope_modules", "meta.json", "", issues)
+
+        run_contract = meta.get("run_contract")
+        if run_contract in (None, ""):
+            issues.append(
+                _issue(
+                    "warning",
+                    "missing_run_contract",
+                    "meta.json has no run_contract. Record authorized origins, actions, budget, data classification, retention, time anchor and end state.",
+                )
+            )
+        elif not isinstance(run_contract, dict):
+            issues.append(_issue("error", "bad_run_contract", "meta.json run_contract must be an object."))
+        else:
+            contract_required = [
+                "authorized_origins",
+                "allowed_actions",
+                "forbidden_actions",
+                "mutation_budget",
+                "data_classification",
+                "evidence_retention",
+                "time_anchor",
+                "end_state",
+            ]
+            missing_contract = [field for field in contract_required if not run_contract.get(field)]
+            if missing_contract:
+                issues.append(
+                    _issue(
+                        "warning",
+                        "incomplete_run_contract",
+                        "meta.json run_contract is missing: " + ", ".join(missing_contract),
+                    )
+                )
+            origins = _string_list(run_contract, "authorized_origins", "run contract", "", issues)
+            if not origins:
+                issues.append(
+                    _issue(
+                        "warning",
+                        "missing_authorized_origins",
+                        "run_contract.authorized_origins is empty. Navigate only to the app origin and record the assumption.",
+                    )
+                )
+            for origin in origins:
+                if not origin.startswith(("http://", "https://")):
+                    issues.append(
+                        _issue(
+                            "error",
+                            "bad_authorized_origin",
+                            f"run_contract.authorized_origins entry '{origin}' must start with http:// or https://.",
+                        )
+                    )
+            time_anchor = run_contract.get("time_anchor")
+            if not isinstance(time_anchor, dict):
+                issues.append(
+                    _issue(
+                        "warning",
+                        "missing_time_anchor",
+                        "run_contract.time_anchor is missing. Record the clock, user timezone and tenant timezone.",
+                    )
+                )
+            else:
+                if not as_text(time_anchor.get("user_timezone")) or not as_text(time_anchor.get("tenant_timezone")):
+                    issues.append(
+                        _issue(
+                            "warning",
+                            "incomplete_time_anchor",
+                            "run_contract.time_anchor needs user_timezone and tenant_timezone.",
+                        )
+                    )
+                if not isinstance(time_anchor.get("can_freeze_time"), bool):
+                    issues.append(
+                        _issue(
+                            "error",
+                            "bad_time_anchor",
+                            "run_contract.time_anchor.can_freeze_time must be true or false.",
+                        )
+                    )
+
     controls = loaded.get("atlas") or []
     relationships = loaded.get("relationships") or []
     cases = loaded.get("test_cases") or []
     defects = loaded.get("defects") or []
     fixtures = loaded.get("fixtures") or []
     config_changes = loaded.get("config_changes") or []
+    configuration_matrix = loaded.get("configuration_matrix") or []
     questions = loaded.get("questions") or []
 
     control_ids = _unique_ids(controls, "control", issues)
@@ -478,7 +620,7 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
         if not tested_by and not reason:
             issues.append(
                 _issue(
-                    "warning",
+                    "error",
                     "uncovered_control",
                     f"Control {ref} has no tested_by case and no not_tested_reason.",
                     ref,
@@ -503,7 +645,7 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
         if not verified_by and not reason:
             issues.append(
                 _issue(
-                    "warning",
+                    "error",
                     "uncovered_relationship",
                     f"Relationship {ref} has no verified_by case and no not_tested_reason.",
                     ref,
@@ -551,11 +693,80 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
                     ref,
                 )
             )
+        oracle = case.get("oracle")
+        if isinstance(oracle, dict):
+            families = _string_list(oracle, "families", "test case oracle", ref, issues)
+            for family in families:
+                if family not in ORACLE_FAMILIES:
+                    issues.append(
+                        _issue(
+                            "error",
+                            "bad_enum",
+                            f"Test case {ref} oracle family '{family}' is invalid. Allowed: {', '.join(ORACLE_FAMILIES)}",
+                            ref,
+                        )
+                    )
+            if as_text(case.get("priority")) in ("P0", "P1") and len(families) < 3:
+                issues.append(
+                    _issue(
+                        "warning",
+                        "oracle_families_thin",
+                        f"Test case {ref} is {as_text(case.get('priority'))} but records only {len(families)} oracle families; use at least three.",
+                        ref,
+                    )
+                )
         status = case.get("status")
         evidence = as_list(case.get("evidence"))
         notes = as_text(case.get("notes"))
         actual = as_text(case.get("actual"))
         expected = as_text(case.get("expected"))
+        triage = case.get("triage")
+        if triage in (None, ""):
+            if status == "Fail":
+                issues.append(
+                    _issue(
+                        "error",
+                        "fail_without_triage",
+                        f"Test case {ref} is Fail but has no triage block. Record a Defect disposition and a reason.",
+                        ref,
+                    )
+                )
+        elif not isinstance(triage, dict):
+            issues.append(_issue("error", "bad_triage", f"Test case {ref} triage must be an object.", ref))
+        else:
+            disposition = as_text(triage.get("disposition"))
+            if disposition not in TRIAGE_DISPOSITIONS:
+                issues.append(
+                    _issue(
+                        "error",
+                        "bad_enum",
+                        f"Test case {ref} triage disposition '{disposition}' is invalid. Allowed: {', '.join(TRIAGE_DISPOSITIONS)}",
+                        ref,
+                    )
+                )
+            if not as_text(triage.get("reason")):
+                issues.append(
+                    _issue("error", "triage_without_reason", f"Test case {ref} triage has no reason.", ref)
+                )
+            if status == "Fail" and disposition != "Defect":
+                issues.append(
+                    _issue(
+                        "error",
+                        "fail_triage_not_defect",
+                        f"Test case {ref} is Fail but triage disposition is '{disposition}', not 'Defect'.",
+                        ref,
+                    )
+                )
+            if status != "Fail" and disposition == "Defect":
+                issues.append(
+                    _issue(
+                        "error",
+                        "triage_defect_without_fail",
+                        f"Test case {ref} is {status} but triage disposition is 'Defect'. Only a Fail can be a Defect.",
+                        ref,
+                    )
+                )
+            _string_list(triage, "evidence", "triage", ref, issues)
         for missing_path in _missing_evidence(ws, evidence):
             issues.append(
                 _issue(
@@ -569,7 +780,7 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
             if not actual:
                 issues.append(_issue("error", "pass_without_actual", f"Test case {ref} is Pass but has no actual result.", ref))
             if not evidence:
-                issues.append(_issue("warning", "pass_without_evidence", f"Test case {ref} is Pass but has no evidence path.", ref))
+                issues.append(_issue("error", "pass_without_evidence", f"Test case {ref} is Pass but has no evidence path.", ref))
         if status == "Fail":
             if not evidence:
                 issues.append(_issue("error", "fail_without_evidence", f"Test case {ref} is Fail but has no evidence.", ref))
@@ -589,7 +800,17 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
                     issues.append(
                         _issue("error", "fail_without_suggestion", f"Test case {ref} has a defect but no suggestion.", ref)
                     )
-        if status in ("Blocked", "Needs Clarification", "Observation", "Not Run"):
+        if status in ("Blocked", "Not Run"):
+            if not notes and not actual:
+                issues.append(
+                    _issue(
+                        "error",
+                        "status_without_explanation",
+                        f"Test case {ref} is {status} but has no explanatory note or actual result.",
+                        ref,
+                    )
+                )
+        elif status in ("Needs Clarification", "Observation"):
             if not notes and not actual:
                 issues.append(
                     _issue(
@@ -623,6 +844,16 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
         _enum(defect, "severity", SEVERITIES, "defect", ref, issues, required=True)
         _enum(defect, "type", DEFECT_TYPES, "defect", ref, issues)
         _enum(defect, "status", DEFECT_STATUSES, "defect", ref, issues)
+        linked_cases = as_list(defect.get("test_case_ids"))
+        if not linked_cases:
+            issues.append(
+                _issue(
+                    "error",
+                    "defect_without_case",
+                    f"Defect {ref} has no test_case_ids. Every defect must link to at least one test case.",
+                    ref,
+                )
+            )
         for missing_path in _missing_evidence(ws, defect.get("evidence")):
             issues.append(
                 _issue(
@@ -644,6 +875,26 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
             continue
         ref = as_text(fixture.get("id")) or "fixture"
         _required(fixture, ["id", "name", "purpose"], "fixture", ref, issues)
+        design = as_text(fixture.get("design"))
+        if design:
+            if design not in FIXTURE_DESIGNS:
+                issues.append(
+                    _issue(
+                        "error",
+                        "bad_enum",
+                        f"Fixture {ref} has invalid design '{design}'. Allowed: {', '.join(FIXTURE_DESIGNS)}",
+                        ref,
+                    )
+                )
+        else:
+            issues.append(
+                _issue(
+                    "warning",
+                    "fixture_without_design",
+                    f"Fixture {ref} has no design. Record stacked, isolate, control or another design.",
+                    ref,
+                )
+            )
 
     for change in config_changes:
         if not isinstance(change, dict):
@@ -675,6 +926,49 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
                     )
                 )
 
+    for entry in configuration_matrix:
+        if not isinstance(entry, dict):
+            continue
+        ref = as_text(entry.get("id")) or "configuration matrix entry"
+        _required(
+            entry,
+            ["id", "area", "setting", "options", "branch", "profile_value"],
+            "configuration matrix entry",
+            ref,
+            issues,
+        )
+        options = _string_list(entry, "options", "configuration matrix entry", ref, issues, required=True)
+        if not options:
+            issues.append(
+                _issue(
+                    "error",
+                    "config_matrix_without_options",
+                    f"Configuration matrix entry {ref} has no options.",
+                    ref,
+                )
+            )
+        tested_by = as_list(entry.get("tested_by"))
+        reason = as_text(entry.get("not_tested_reason"))
+        if not tested_by and not reason:
+            issues.append(
+                _issue(
+                    "error",
+                    "config_matrix_uncovered",
+                    f"Configuration matrix entry {ref} has no tested_by case and no not_tested_reason.",
+                    ref,
+                )
+            )
+        for case_id in tested_by:
+            if as_text(case_id) not in case_ids:
+                issues.append(
+                    _issue(
+                        "error",
+                        "bad_ref",
+                        f"Configuration matrix entry {ref} references missing test case '{case_id}'.",
+                        ref,
+                    )
+                )
+
     # Questions
     for question in questions:
         if not isinstance(question, dict):
@@ -686,10 +980,33 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
     # Coverage warnings
     modules_with_cases = {as_text(c.get("module")) for c in cases if as_text(c.get("module"))}
     modules_with_controls = {as_text(c.get("module")) for c in controls if as_text(c.get("module"))}
+    in_scope_modules = [as_text(m) for m in as_list(meta.get("in_scope_modules")) if as_text(m)]
+    if not in_scope_modules and as_text(meta.get("module")):
+        in_scope_modules = [as_text(meta.get("module"))]
     for module in sorted(modules_with_controls - modules_with_cases):
-        issues.append(
-            _issue("warning", "module_without_cases", f"Module '{module}' has controls but no test cases.", module)
-        )
+        if module not in in_scope_modules:
+            issues.append(
+                _issue("warning", "module_without_cases", f"Module '{module}' has controls but no test cases.", module)
+            )
+    for module in in_scope_modules:
+        if module not in modules_with_cases:
+            issues.append(
+                _issue(
+                    "error",
+                    "in_scope_module_without_cases",
+                    f"In-scope module '{module}' has no test cases. Add a case or narrow the scope.",
+                    module,
+                )
+            )
+        if module not in modules_with_controls:
+            issues.append(
+                _issue(
+                    "warning",
+                    "in_scope_module_without_controls",
+                    f"In-scope module '{module}' has no controls in the atlas. Confirm the module name or record it as not reached.",
+                    module,
+                )
+            )
 
     roles = {as_text(c.get("role")) for c in cases if as_text(c.get("role"))}
     if cases and not roles:
@@ -719,10 +1036,12 @@ def counts_by(items: list, key: str, allowed: list | None = None) -> dict:
 
 
 def coverage(loaded: dict) -> dict:
+    meta = loaded.get("meta") or {}
     controls = loaded.get("atlas") or []
     relationships = loaded.get("relationships") or []
     cases = loaded.get("test_cases") or []
     defects = loaded.get("defects") or []
+    configuration_matrix = loaded.get("configuration_matrix") or []
 
     controls_tested = [c for c in controls if as_list(c.get("tested_by"))]
     relationships_verified = [r for r in relationships if as_list(r.get("verified_by"))]
@@ -730,61 +1049,89 @@ def coverage(loaded: dict) -> dict:
     severity_counts = counts_by(defects, "severity", SEVERITIES)
     defect_status_counts = counts_by(defects, "status", DEFECT_STATUSES)
 
+    triage_counts = {value: 0 for value in TRIAGE_DISPOSITIONS}
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        triage = case.get("triage")
+        if isinstance(triage, dict):
+            disposition = as_text(triage.get("disposition"))
+            if disposition in triage_counts:
+                triage_counts[disposition] += 1
+
+    in_scope_modules = [as_text(m) for m in as_list(meta.get("in_scope_modules")) if as_text(m)]
+    if not in_scope_modules and as_text(meta.get("module")):
+        in_scope_modules = [as_text(meta.get("module"))]
+
     pass_count = status_counts.get("Pass", 0)
     fail_count = status_counts.get("Fail", 0)
     executed = pass_count + fail_count
     pass_rate = (pass_count / executed * 100) if executed else 0.0
 
     module_rows = {}
+
+    def get_module_row(module: str) -> dict:
+        return module_rows.setdefault(
+            module,
+            {
+                "module": module,
+                "in_scope": module in in_scope_modules,
+                "controls": 0,
+                "controls_tested": 0,
+                "controls_not_tested": 0,
+                "controls_explained": 0,
+                "gaps": 0,
+                "cases": 0,
+                "defects": 0,
+                "Pass": 0,
+                "Fail": 0,
+                "Blocked": 0,
+                "Needs Clarification": 0,
+                "Observation": 0,
+                "Not Run": 0,
+            },
+        )
+
     for control in controls:
+        if not isinstance(control, dict):
+            continue
         module = as_text(control.get("module")) or "(unknown)"
-        row = module_rows.setdefault(
-            module,
-            {
-                "module": module,
-                "controls": 0,
-                "controls_tested": 0,
-                "cases": 0,
-                "Pass": 0,
-                "Fail": 0,
-                "Blocked": 0,
-                "Needs Clarification": 0,
-                "Observation": 0,
-                "Not Run": 0,
-            },
-        )
+        row = get_module_row(module)
         row["controls"] += 1
-        if as_list(control.get("tested_by")):
+        tested = bool(as_list(control.get("tested_by")))
+        reason = as_text(control.get("not_tested_reason"))
+        if tested:
             row["controls_tested"] += 1
+        if tested or reason:
+            row["controls_explained"] += 1
+        else:
+            row["gaps"] += 1
     for case in cases:
+        if not isinstance(case, dict):
+            continue
         module = as_text(case.get("module")) or "(unknown)"
-        row = module_rows.setdefault(
-            module,
-            {
-                "module": module,
-                "controls": 0,
-                "controls_tested": 0,
-                "cases": 0,
-                "Pass": 0,
-                "Fail": 0,
-                "Blocked": 0,
-                "Needs Clarification": 0,
-                "Observation": 0,
-                "Not Run": 0,
-            },
-        )
+        row = get_module_row(module)
         row["cases"] += 1
         status = as_text(case.get("status"))
         if status in row:
             row[status] += 1
+    for defect in defects:
+        if not isinstance(defect, dict):
+            continue
+        module = as_text(defect.get("module")) or "(unknown)"
+        get_module_row(module)["defects"] += 1
     for row in module_rows.values():
         row["controls_not_tested"] = max(0, row["controls"] - row["controls_tested"])
         row["coverage_pct"] = (
             row["controls_tested"] / row["controls"] * 100 if row["controls"] else 0.0
         )
+        in_scope_gap = bool(row["in_scope"]) and row["cases"] == 0
+        row["status"] = "OK" if row["gaps"] == 0 and not in_scope_gap else "CHECK"
 
     category_rows = {}
     for case in cases:
+        if not isinstance(case, dict):
+            continue
         category = as_text(case.get("category")) or "(uncategorised)"
         row = category_rows.setdefault(
             category,
@@ -804,6 +1151,108 @@ def coverage(loaded: dict) -> dict:
         if status in row:
             row[status] += 1
 
+    control_gaps = [
+        c
+        for c in controls
+        if isinstance(c, dict)
+        and not as_list(c.get("tested_by"))
+        and not as_text(c.get("not_tested_reason"))
+    ]
+    relationship_gaps = [
+        r
+        for r in relationships
+        if isinstance(r, dict)
+        and not as_list(r.get("verified_by"))
+        and not as_text(r.get("not_tested_reason"))
+    ]
+    pass_cases = [c for c in cases if isinstance(c, dict) and as_text(c.get("status")) == "Pass"]
+    pass_without_evidence = [c for c in pass_cases if not as_list(c.get("evidence"))]
+    fail_cases = [c for c in cases if isinstance(c, dict) and as_text(c.get("status")) == "Fail"]
+    fail_without_defect = []
+    fail_without_triage = []
+    for case in fail_cases:
+        ref = as_text(case.get("id"))
+        linked = any(
+            ref and ref in [as_text(x) for x in as_list(d.get("test_case_ids"))]
+            for d in defects
+            if isinstance(d, dict)
+        )
+        if not linked:
+            fail_without_defect.append(case)
+        triage = case.get("triage")
+        if not (
+            isinstance(triage, dict)
+            and as_text(triage.get("disposition")) == "Defect"
+            and as_text(triage.get("reason"))
+        ):
+            fail_without_triage.append(case)
+    defects_without_cases = [
+        d for d in defects if isinstance(d, dict) and not as_list(d.get("test_case_ids"))
+    ]
+    skips_without_reason = [
+        c
+        for c in cases
+        if isinstance(c, dict)
+        and as_text(c.get("status")) in ("Blocked", "Not Run")
+        and not (as_text(c.get("notes")) or as_text(c.get("actual")))
+    ]
+    config_matrix_gaps = [
+        e
+        for e in configuration_matrix
+        if isinstance(e, dict)
+        and not as_list(e.get("tested_by"))
+        and not as_text(e.get("not_tested_reason"))
+    ]
+    modules_with_cases = {as_text(c.get("module")) for c in cases if isinstance(c, dict) and as_text(c.get("module"))}
+    in_scope_without_cases = [m for m in in_scope_modules if m not in modules_with_cases]
+
+    # Only recognized statuses reconcile; blank or unknown statuses are gaps.
+    status_total = sum(status_counts.get(status, 0) for status in STATUSES)
+    reconciliation = {
+        "controls_total": len(controls),
+        "controls_tested": len(controls_tested),
+        "controls_not_tested": len(controls) - len(controls_tested),
+        "controls_explained": len(controls) - len(control_gaps),
+        "controls_unexplained": len(control_gaps),
+        "relationships_total": len(relationships),
+        "relationships_verified": len(relationships_verified),
+        "relationships_not_tested": len(relationships) - len(relationships_verified),
+        "relationships_explained": len(relationships) - len(relationship_gaps),
+        "relationships_unexplained": len(relationship_gaps),
+        "cases_total": len(cases),
+        "status_total": status_total,
+        "cases_unaccounted": len(cases) - status_total,
+        "passes_total": len(pass_cases),
+        "passes_with_evidence": len(pass_cases) - len(pass_without_evidence),
+        "passes_without_evidence": len(pass_without_evidence),
+        "fails_total": len(fail_cases),
+        "fails_with_defect": len(fail_cases) - len(fail_without_defect),
+        "fails_without_defect": len(fail_without_defect),
+        "fails_without_triage": len(fail_without_triage),
+        "defects_total": len(defects),
+        "defects_with_cases": len(defects) - len(defects_without_cases),
+        "defects_without_cases": len(defects_without_cases),
+        "skips_without_reason": len(skips_without_reason),
+        "in_scope_modules_total": len(in_scope_modules),
+        "in_scope_modules_without_cases": len(in_scope_without_cases),
+        "config_matrix_total": len(configuration_matrix),
+        "config_matrix_unexplained": len(config_matrix_gaps),
+    }
+    reconciliation["ok"] = all(
+        [
+            reconciliation["controls_unexplained"] == 0,
+            reconciliation["relationships_unexplained"] == 0,
+            reconciliation["cases_unaccounted"] == 0,
+            reconciliation["passes_without_evidence"] == 0,
+            reconciliation["fails_without_defect"] == 0,
+            reconciliation["fails_without_triage"] == 0,
+            reconciliation["defects_without_cases"] == 0,
+            reconciliation["skips_without_reason"] == 0,
+            reconciliation["in_scope_modules_without_cases"] == 0,
+            reconciliation["config_matrix_unexplained"] == 0,
+        ]
+    )
+
     return {
         "controls_total": len(controls),
         "controls_tested": len(controls_tested),
@@ -822,5 +1271,8 @@ def coverage(loaded: dict) -> dict:
         "pass_rate": pass_rate,
         "module_rows": sorted(module_rows.values(), key=lambda row: row["module"].lower()),
         "category_rows": sorted(category_rows.values(), key=lambda row: row["category"].lower()),
-        "roles": sorted({as_text(c.get("role")) for c in cases if as_text(c.get("role"))}),
+        "roles": sorted({as_text(c.get("role")) for c in cases if isinstance(c, dict) and as_text(c.get("role"))}),
+        "in_scope_modules": in_scope_modules,
+        "triage_counts": triage_counts,
+        "reconciliation": reconciliation,
     }

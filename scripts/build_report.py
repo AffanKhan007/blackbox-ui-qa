@@ -40,6 +40,7 @@ from qa_common import (
     REL_TYPES,
     SEVERITIES,
     STATUSES,
+    TRIAGE_DISPOSITIONS,
     as_list,
     as_text,
     coverage,
@@ -307,6 +308,41 @@ def build_summary(wb: Workbook, loaded: dict, stats: dict, issues: list, *, inco
             merge_write(ws, row, 5, 6, second[1])
         row += 1
 
+    run_contract = meta.get("run_contract") if isinstance(meta.get("run_contract"), dict) else {}
+    if run_contract:
+        row += 1
+        row = section(ws, row, "Run contract", 6)
+        forbidden = sorted(
+            {
+                as_text(item)
+                for item in as_list(meta.get("forbidden_actions")) + as_list(run_contract.get("forbidden_actions"))
+                if as_text(item)
+            }
+        )
+        time_anchor = run_contract.get("time_anchor") if isinstance(run_contract.get("time_anchor"), dict) else {}
+        contract_rows = [
+            ("Authorized origins", as_text(run_contract.get("authorized_origins"))),
+            ("Allowed actions", as_text(run_contract.get("allowed_actions"))),
+            ("Forbidden actions", as_text(forbidden)),
+            ("Mutation budget", run_contract.get("mutation_budget")),
+            ("Data classification", run_contract.get("data_classification")),
+            ("Evidence retention", run_contract.get("evidence_retention")),
+            (
+                "Time anchor",
+                f"clock {as_text(time_anchor.get('clock')) or 'not recorded'} | "
+                f"user {as_text(time_anchor.get('user_timezone')) or 'not recorded'} | "
+                f"tenant {as_text(time_anchor.get('tenant_timezone')) or 'not recorded'} | "
+                f"freeze: {'yes' if time_anchor.get('can_freeze_time') is True else 'no'}",
+            ),
+            ("End state", run_contract.get("end_state")),
+        ]
+        for label, value in contract_rows:
+            ws.cell(row=row, column=1, value=label).font = Font(name="Calibri", size=10, bold=True, color=NAVY)
+            ws.cell(row=row, column=1).fill = PatternFill("solid", fgColor=LIGHT_BLUE)
+            ws.cell(row=row, column=1).border = BORDER
+            merge_write(ws, row, 2, 6, value)
+            row += 1
+
     row += 1
     row = section(ws, row, "Results", 6)
     status_header_row = row
@@ -404,6 +440,79 @@ def build_summary(wb: Workbook, loaded: dict, stats: dict, issues: list, *, inco
         row += 1
 
     row += 1
+    row = section(ws, row, "Reconciliation", 6)
+    rec = stats["reconciliation"]
+    checks = [
+        (
+            "Controls",
+            f"{rec['controls_total']} = {rec['controls_tested']} tested + {rec['controls_not_tested']} not tested; {rec['controls_unexplained']} unexplained",
+            rec["controls_unexplained"] == 0,
+        ),
+        (
+            "Relationships",
+            f"{rec['relationships_total']} = {rec['relationships_verified']} verified + {rec['relationships_not_tested']} not tested; {rec['relationships_unexplained']} unexplained",
+            rec["relationships_unexplained"] == 0,
+        ),
+        (
+            "Cases",
+            f"{rec['cases_total']} = {rec['status_total']} status-counted; {rec['cases_unaccounted']} unaccounted",
+            rec["cases_unaccounted"] == 0,
+        ),
+        (
+            "Passes",
+            f"{rec['passes_total']} = {rec['passes_with_evidence']} evidenced + {rec['passes_without_evidence']} missing",
+            rec["passes_without_evidence"] == 0,
+        ),
+        (
+            "Fails",
+            f"{rec['fails_total']} = {rec['fails_with_defect']} linked + {rec['fails_without_defect']} unlinked; {rec['fails_without_triage']} untriaged",
+            rec["fails_without_defect"] == 0 and rec["fails_without_triage"] == 0,
+        ),
+        (
+            "Defects",
+            f"{rec['defects_total']} = {rec['defects_with_cases']} linked + {rec['defects_without_cases']} orphan",
+            rec["defects_without_cases"] == 0,
+        ),
+        (
+            "Skips",
+            f"{rec['skips_without_reason']} Blocked/Not Run without a reason",
+            rec["skips_without_reason"] == 0,
+        ),
+        (
+            "In-scope modules",
+            f"{rec['in_scope_modules_total']} total; {rec['in_scope_modules_without_cases']} without cases",
+            rec["in_scope_modules_without_cases"] == 0,
+        ),
+        (
+            "Configuration matrix",
+            f"{rec['config_matrix_total']} entries; {rec['config_matrix_unexplained']} unexplained",
+            rec["config_matrix_unexplained"] == 0,
+        ),
+    ]
+    for label, detail, ok in checks:
+        ws.cell(row=row, column=1, value=label).font = Font(name="Calibri", size=10, bold=True, color=NAVY)
+        ws.cell(row=row, column=1).fill = PatternFill("solid", fgColor=LIGHT_BLUE)
+        ws.cell(row=row, column=1).border = BORDER
+        merge_write(ws, row, 2, 4, detail)
+        status_cell = ws.cell(row=row, column=5, value="OK" if ok else "CHECK")
+        status_cell.font = Font(name="Calibri", size=10, bold=True, color="006100" if ok else "9C0006")
+        status_cell.fill = PatternFill("solid", fgColor="C6EFCE" if ok else "FFC7CE")
+        status_cell.border = BORDER
+        status_cell.alignment = Alignment(horizontal="center", vertical="top")
+        row += 1
+
+    row += 1
+    row = section(ws, row, "Anomaly triage", 6)
+    for disposition in TRIAGE_DISPOSITIONS:
+        ws.cell(row=row, column=1, value=disposition).font = Font(name="Calibri", size=10, bold=True, color=NAVY)
+        ws.cell(row=row, column=1).fill = PatternFill("solid", fgColor=LIGHT_BLUE)
+        ws.cell(row=row, column=1).border = BORDER
+        ws.cell(row=row, column=2, value=stats["triage_counts"].get(disposition, 0)).border = BORDER
+        ws.cell(row=row, column=2).alignment = Alignment(horizontal="center")
+        merge_write(ws, row, 3, 6, "Only Defect becomes Fail." if disposition == "Defect" else "", font=SMALL_FONT)
+        row += 1
+
+    row += 1
     row = section(ws, row, "Top risks / defects", 6)
     defects = sorted(
         loaded.get("defects") or [],
@@ -450,6 +559,8 @@ def build_summary(wb: Workbook, loaded: dict, stats: dict, issues: list, *, inco
         "Status vocabulary: Pass, Fail, Blocked, Needs Clarification, Observation, Not Run.",
         "Pass rate = Pass / (Pass + Fail); Blocked and Not Run are excluded and listed separately.",
         "Coverage is controls tested / controls inventoried. A control is tested when tested_by is set.",
+        "Reconciliation proves the counts: controls = tested + explained skips; cases = sum of statuses; every Pass evidenced; every Fail linked and triaged; every defect linked.",
+        "Anomaly triage shows what was rejected before becoming a defect; only Defect becomes Fail.",
         "Evidence paths are relative to the workspace; open the files next to this workbook.",
         "Every Fail must have evidence, reproduction steps, severity and a suggestion. Drafts may not.",
     ]
@@ -484,7 +595,7 @@ def build_test_cases(wb: Workbook, loaded: dict) -> None:
         "Role",
         "Preconditions & Test Data",
         "Steps",
-        "Oracle (type / source / confidence)",
+        "Oracle (type / source / confidence / families)",
         "Expected",
         "Actual",
         "Status",
@@ -497,14 +608,17 @@ def build_test_cases(wb: Workbook, loaded: dict) -> None:
         "Suggestion",
         "Notes",
         "Executed At",
+        "Triage Disposition",
+        "Triage Reason",
     ]
-    widths = [10, 16, 28, 38, 20, 18, 8, 28, 14, 38, 48, 38, 38, 38, 16, 12, 18, 20, 16, 16, 34, 34, 30, 18]
+    widths = [10, 16, 28, 38, 20, 18, 8, 28, 14, 38, 48, 38, 38, 38, 16, 12, 18, 20, 16, 16, 34, 34, 30, 18, 18, 36]
     set_widths(ws, widths)
     rows = []
     for case in loaded.get("test_cases") or []:
         preconditions = as_text(case.get("preconditions"))
         test_data = as_text(case.get("test_data"))
         combined = "\n".join(part for part in [preconditions, test_data] if part)
+        triage = case.get("triage") if isinstance(case.get("triage"), dict) else {}
         rows.append(
             [
                 case.get("id"),
@@ -531,6 +645,8 @@ def build_test_cases(wb: Workbook, loaded: dict) -> None:
                 case.get("suggestion"),
                 case.get("notes"),
                 case.get("executed_at"),
+                triage.get("disposition"),
+                triage.get("reason"),
             ]
         )
     last_row = write_table(
@@ -662,6 +778,43 @@ def build_coverage(wb: Workbook, loaded: dict, stats: dict) -> None:
         1,
         12,
         "Coverage % = controls tested / controls inventoried. A control is tested when its tested_by field is non-empty.",
+        font=SMALL_FONT,
+    )
+    row += 3
+
+    row = section(ws, row, "Module traceability", 12)
+    headers = [
+        "Module",
+        "In Scope",
+        "Controls",
+        "Controls Covered",
+        "Cases",
+        "Fail",
+        "Defects",
+        "Unexplained Gaps",
+        "Status",
+    ]
+    rows = [
+        [
+            r["module"],
+            "Yes" if r["in_scope"] else "No",
+            r["controls"],
+            r["controls_explained"],
+            r["cases"],
+            r["Fail"],
+            r["defects"],
+            r["gaps"],
+            r["status"],
+        ]
+        for r in stats["module_rows"]
+    ]
+    row = write_table(ws, row, headers, rows, [24, 10, 10, 14, 8, 8, 8, 14, 10])
+    merge_write(
+        ws,
+        row + 1,
+        1,
+        12,
+        "A gap is a control with neither a case nor a reason; an in-scope module with no cases is also a gap.",
         font=SMALL_FONT,
     )
     row += 3
@@ -831,13 +984,14 @@ def build_data_config(wb: Workbook, loaded: dict) -> None:
     ws.sheet_view.showGridLines = False
     set_widths(ws, [10, 34, 34, 26, 14, 40, 34])
 
-    row = section(ws, 1, "Test fixtures", 7)
-    headers = ["ID", "Name", "Purpose", "Created Via", "Status", "Cleanup", "Notes"]
+    row = section(ws, 1, "Test fixtures", 8)
+    headers = ["ID", "Name", "Purpose", "Design", "Created Via", "Status", "Cleanup", "Notes"]
     rows = [
         [
             fixture.get("id"),
             fixture.get("name"),
             fixture.get("purpose"),
+            fixture.get("design"),
             fixture.get("created_via"),
             fixture.get("status"),
             fixture.get("cleanup"),
@@ -845,7 +999,7 @@ def build_data_config(wb: Workbook, loaded: dict) -> None:
         ]
         for fixture in loaded.get("fixtures") or []
     ]
-    row = write_table(ws, row, headers, rows, [10, 34, 34, 26, 14, 40, 34])
+    row = write_table(ws, row, headers, rows, [10, 34, 34, 12, 26, 14, 40, 34])
     row += 2
 
     row = section(ws, row, "Configuration changes", 7)
@@ -889,6 +1043,41 @@ def build_data_config(wb: Workbook, loaded: dict) -> None:
         if ws.cell(row=row_index, column=9).value == "No":
             for col in range(1, 14):
                 ws.cell(row=row_index, column=col).fill = PatternFill("solid", fgColor="FFC7CE")
+
+    row = last_row + 2
+    row = section(ws, row, "Configuration matrix", 8)
+    headers = [
+        "ID",
+        "Area",
+        "Setting",
+        "Options",
+        "Branch",
+        "Profile Value",
+        "Tested By",
+        "Not Tested Reason",
+    ]
+    rows = [
+        [
+            entry.get("id"),
+            entry.get("area"),
+            entry.get("setting"),
+            as_text(entry.get("options"), "; "),
+            entry.get("branch"),
+            entry.get("profile_value"),
+            as_text(entry.get("tested_by")),
+            entry.get("not_tested_reason"),
+        ]
+        for entry in loaded.get("configuration_matrix") or []
+    ]
+    row = write_table(ws, row, headers, rows, [10, 28, 24, 34, 30, 16, 16, 34])
+    merge_write(
+        ws,
+        row + 1,
+        1,
+        8,
+        "A configuration-matrix entry needs a tested_by case or a not_tested_reason. The profile is a valid feature-complete combination, not every option at maximum.",
+        font=SMALL_FONT,
+    )
     ws.freeze_panes = "A2"
 
 

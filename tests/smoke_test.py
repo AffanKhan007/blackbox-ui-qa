@@ -47,6 +47,22 @@ def populate(workspace: Path) -> None:
             "locale": "en-US",
             "timezone": "Asia/Karachi",
             "limitations": ["Manager role not available"],
+            "in_scope_modules": ["Payroll"],
+            "run_contract": {
+                "authorized_origins": ["https://staging.example.com"],
+                "allowed_actions": ["read", "create QA_ records", "edit QA_ records", "delete QA_ records"],
+                "forbidden_actions": ["finalise payroll", "send email"],
+                "mutation_budget": "10 created records; 5 config changes",
+                "data_classification": "synthetic test data only",
+                "evidence_retention": "retain workspace until handoff",
+                "time_anchor": {
+                    "clock": "2026-11-04T09:00:00Z",
+                    "user_timezone": "Asia/Karachi",
+                    "tenant_timezone": "Asia/Karachi",
+                    "can_freeze_time": False,
+                },
+                "end_state": "All QA_ fixtures deleted or archived; config restored; no outbound messages.",
+            },
         }
     )
     write_json(meta_path, meta)
@@ -165,6 +181,7 @@ def populate(workspace: Path) -> None:
                 "type": "Calculation",
                 "source": "calc/TC-0001.py",
                 "confidence": "High",
+                "families": ["Claims", "Product", "Purpose"],
                 "description": "10,000 - 1,000 - 500 = 8,500.",
             },
             "expected": "8,500.00",
@@ -201,6 +218,7 @@ def populate(workspace: Path) -> None:
                 "type": "Calculation + in-app policy",
                 "source": "Settings > Loans > Cap = 30%; calc/TC-0002.py",
                 "confidence": "High",
+                "families": ["Claims", "World", "Product"],
                 "description": "Loan deduction must be <= 30% of net pay; expected 3,000.",
             },
             "expected": "Loan deduction = 3,000.00; net pay = 7,000.00.",
@@ -218,6 +236,11 @@ def populate(workspace: Path) -> None:
             ],
             "suggestion": "Apply the cap after tax and other deductions; add a boundary regression test.",
             "notes": "Reproduced twice; persists after reload.",
+            "triage": {
+                "disposition": "Defect",
+                "reason": "Reproduced twice from a clean state; expected derived independently before observing the actual.",
+                "evidence": ["evidence/screenshots/TC-0002.png"],
+            },
             "executed_at": "2026-11-04T12:40:00Z",
         },
         {
@@ -237,6 +260,7 @@ def populate(workspace: Path) -> None:
                 "type": "User spec",
                 "source": "Scope: bank file must match the run total.",
                 "confidence": "Medium",
+                "families": ["Claims", "World", "Purpose"],
                 "description": "File total equals the run net total.",
             },
             "expected": "A CSV whose total equals the run net total.",
@@ -250,6 +274,11 @@ def populate(workspace: Path) -> None:
             "evidence": ["evidence/screenshots/TC-0003.png"],
             "suggestion": "",
             "notes": "Export permission is not available for the provided role.",
+            "triage": {
+                "disposition": "Environment/data",
+                "reason": "The provided role lacks the export permission; this is an access limitation, not a product defect.",
+                "evidence": ["evidence/screenshots/TC-0003.png"],
+            },
             "executed_at": "2026-11-04T13:00:00Z",
         },
         {
@@ -282,6 +311,11 @@ def populate(workspace: Path) -> None:
             "evidence": ["evidence/screenshots/TC-0004.png"],
             "suggestion": "Use one label.",
             "notes": "Cosmetic; recorded as an observation.",
+            "triage": {
+                "disposition": "Observation",
+                "reason": "The label difference is real but cosmetic; it does not contradict a functional oracle.",
+                "evidence": ["evidence/screenshots/TC-0004.png"],
+            },
             "executed_at": "2026-11-04T13:10:00Z",
         },
     ]
@@ -325,6 +359,7 @@ def populate(workspace: Path) -> None:
                     "id": "F-0001",
                     "name": "QA_EMP_02_loan_cap",
                     "purpose": "Loan cap boundary",
+                    "design": "stacked",
                     "created_via": "Employees > Add",
                     "status": "active",
                     "cleanup": "delete after the payroll run",
@@ -346,6 +381,18 @@ def populate(workspace: Path) -> None:
                     "restored_value": "30",
                     "evidence": "evidence/snapshots/E-001.html",
                     "notes": "",
+                }
+            ],
+            "configuration_matrix": [
+                {
+                    "id": "CFG-0001",
+                    "area": "Payroll > Run > Settings",
+                    "setting": "Rounding",
+                    "options": ["Half-up", "Half-even"],
+                    "branch": "All calculated amounts",
+                    "profile_value": "Half-even",
+                    "tested_by": [],
+                    "not_tested_reason": "Rounding variants are out of scope in this run.",
                 }
             ],
         },
@@ -385,6 +432,7 @@ def populate(workspace: Path) -> None:
         "evidence/network/TC-0002.json",
         "evidence/snapshots/E-001.html",
         "evidence/snapshots/S-001.html",
+        "evidence/security/injection_excerpt.txt",
         "calc/TC-0001.py",
         "calc/TC-0002.py",
     ]:
@@ -438,10 +486,19 @@ def main() -> int:
         assert wb["Test Cases"].max_row == 5, wb["Test Cases"].max_row
         assert wb["Test Cases"]["O2"].value == "Pass", wb["Test Cases"]["O2"].value
         assert wb["Test Cases"]["O3"].value == "Fail", wb["Test Cases"]["O3"].value
+        assert wb["Test Cases"]["Y3"].value == "Defect", wb["Test Cases"]["Y3"].value
         assert wb["Defects"].max_row == 2, wb["Defects"].max_row
         assert wb["Field Atlas"].max_row == 4, wb["Field Atlas"].max_row
         assert wb["Relationships"].max_row == 3, wb["Relationships"].max_row
         assert wb["Coverage"]["A3"].value == "Payroll", wb["Coverage"]["A3"].value
+        summary_values = [cell.value for row in wb["Summary"].iter_rows() for cell in row if cell.value]
+        assert "Reconciliation" in summary_values, summary_values
+        assert "Anomaly triage" in summary_values, summary_values
+        assert "Run contract" in summary_values, summary_values
+        coverage_values = [cell.value for row in wb["Coverage"].iter_rows() for cell in row if cell.value]
+        assert "Module traceability" in coverage_values, coverage_values
+        config_values = [cell.value for row in wb["Test Data & Config"].iter_rows() for cell in row if cell.value]
+        assert "Configuration matrix" in config_values, config_values
 
         # Negative path: a Fail without evidence or a linked defect must block a final report.
         cases_path = workspace / "05-test-cases.json"
@@ -457,6 +514,7 @@ def main() -> int:
         assert result.returncode != 0, "validation should fail for a Fail without evidence/defect"
         assert "fail_without_evidence" in result.stdout, result.stdout
         assert "fail_without_defect" in result.stdout, result.stdout
+        assert "fail_without_triage" in result.stdout, result.stdout
 
         result = run(str(SCRIPTS / "build_report.py"), str(workspace), "--output", str(workspace / "blocked.xlsx"))
         assert result.returncode != 0, "build_report should refuse a final report with errors"
@@ -472,6 +530,73 @@ def main() -> int:
         assert result.returncode == 0, result.stdout + result.stderr
         draft_wb = load_workbook(draft)
         assert "DRAFT" in str(draft_wb["Summary"]["A3"].value), draft_wb["Summary"]["A3"].value
+
+        # Negative path: an uncovered control is an unreconciled gap.
+        populate(workspace)
+        atlas_path = workspace / "02-field-atlas.json"
+        atlas = json.loads(atlas_path.read_text(encoding="utf-8"))
+        atlas["controls"][0]["tested_by"] = []
+        atlas["controls"][0]["not_tested_reason"] = ""
+        write_json(atlas_path, atlas)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert result.returncode != 0, "validation should fail for an uncovered control"
+        report = json.loads(result.stdout)
+        assert report["stats"]["reconciliation"]["controls_unexplained"] == 1, report["stats"]
+        assert any(issue["code"] == "uncovered_control" for issue in report["errors"]), report["errors"]
+
+        # Negative path: a Pass without evidence is an error.
+        populate(workspace)
+        cases_path = workspace / "05-test-cases.json"
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))
+        cases["test_cases"][0]["evidence"] = []
+        write_json(cases_path, cases)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
+        assert result.returncode != 0, "validation should fail for a Pass without evidence"
+        assert "pass_without_evidence" in result.stdout, result.stdout
+
+        # Negative path: a Fail without triage is an error even when a defect is linked.
+        populate(workspace)
+        cases_path = workspace / "05-test-cases.json"
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))
+        del cases["test_cases"][1]["triage"]
+        write_json(cases_path, cases)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
+        assert result.returncode != 0, "validation should fail for a Fail without triage"
+        assert "fail_without_triage" in result.stdout, result.stdout
+
+        # Negative path: a defect with no linked case is an orphan.
+        populate(workspace)
+        defects_path = workspace / "06-defects.json"
+        defects = json.loads(defects_path.read_text(encoding="utf-8"))
+        defects["defects"][0]["test_case_ids"] = []
+        write_json(defects_path, defects)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
+        assert result.returncode != 0, "validation should fail for an orphan defect"
+        assert "defect_without_case" in result.stdout, result.stdout
+        assert "fail_without_defect" in result.stdout, result.stdout
+
+        # Negative path: a case without a status leaves the counts unreconciled.
+        populate(workspace)
+        cases_path = workspace / "05-test-cases.json"
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))
+        cases["test_cases"][0]["status"] = ""
+        write_json(cases_path, cases)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert result.returncode != 0, "validation should fail for an unreconciled count"
+        report = json.loads(result.stdout)
+        assert report["stats"]["reconciliation"]["cases_unaccounted"] == 1, report["stats"]
+        assert report["stats"]["reconciliation"]["ok"] is False, report["stats"]
+
+        # Negative path: a configuration-matrix row with no case and no reason is a gap.
+        populate(workspace)
+        ledger_path = workspace / "07-fixtures-and-config-ledger.json"
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        ledger["configuration_matrix"][0]["tested_by"] = []
+        ledger["configuration_matrix"][0]["not_tested_reason"] = ""
+        write_json(ledger_path, ledger)
+        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
+        assert result.returncode != 0, "validation should fail for an unexplained configuration row"
+        assert "config_matrix_uncovered" in result.stdout, result.stdout
 
         print("Smoke test passed.")
         print(f"Workbook: {output}")

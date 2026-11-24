@@ -46,6 +46,8 @@ def main() -> int:
                         "cases": stats["cases_total"],
                         "status_counts": stats["status_counts"],
                         "defects": len(loaded.get("defects") or []),
+                        "triage_counts": stats["triage_counts"],
+                        "reconciliation": stats["reconciliation"],
                     },
                 },
                 indent=2,
@@ -58,6 +60,16 @@ def main() -> int:
             f"Controls: {stats['controls_total']} ({stats['controls_tested']} tested) | "
             f"Relationships: {stats['relationships_total']} ({stats['relationships_verified']} verified) | "
             f"Cases: {stats['cases_total']} | Defects: {len(loaded.get('defects') or [])}"
+        )
+        rec = stats["reconciliation"]
+        print(
+            f"Reconciliation: {'OK' if rec['ok'] else 'CHECK'} | "
+            f"unexplained controls {rec['controls_unexplained']} | "
+            f"passes without evidence {rec['passes_without_evidence']} | "
+            f"fails without defect {rec['fails_without_defect']} | "
+            f"fails without triage {rec['fails_without_triage']} | "
+            f"orphan defects {rec['defects_without_cases']} | "
+            f"in-scope modules without cases {rec['in_scope_modules_without_cases']}"
         )
         print(f"Errors: {len(errors)} | Warnings: {len(warnings)}")
         if errors:

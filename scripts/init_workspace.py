@@ -35,6 +35,16 @@ SCOPE_TEMPLATE = """# QA scope
 
 <!-- Explicit exclusions, with the reason. -->
 
+## Run contract
+
+- **Authorized origins:** <!-- Only these origins may be visited. -->
+- **Allowed actions:** <!-- read-only recon, create/edit/delete QA_ records, ... -->
+- **Mutation budget:** <!-- e.g. 50 created records, 20 config changes. -->
+- **Data classification:** <!-- e.g. synthetic test data only. -->
+- **Evidence retention:** <!-- Who keeps the workspace, and for how long. -->
+- **Time anchor:** <!-- clock; user timezone; tenant timezone; can the host freeze time? -->
+- **End state:** <!-- Fixtures removed or archived; config restored; side effects accounted for. -->
+
 ## Roles and access
 
 | Role | Access confirmed | Notes |
@@ -169,6 +179,7 @@ SC-001  "<short name>"
   Risk:
   Touches:
   Expected:
+  End state:
 ```
 
 ## Scenarios
@@ -225,7 +236,7 @@ def main() -> int:
         return 1
 
     workspace.mkdir(parents=True, exist_ok=True)
-    for folder in ["evidence/screenshots", "evidence/snapshots", "evidence/network", "evidence/console", "evidence/outputs", "calc"]:
+    for folder in ["evidence/screenshots", "evidence/snapshots", "evidence/network", "evidence/console", "evidence/outputs", "evidence/security", "calc"]:
         (workspace / folder).mkdir(parents=True, exist_ok=True)
 
     scope = args.module or "Whole application"
@@ -239,6 +250,7 @@ def main() -> int:
         "scope": scope,
         "depth": args.depth.capitalize(),
         "module": args.module,
+        "in_scope_modules": [args.module] if args.module else [],
         "roles": [],
         "host": "",
         "browser_tool": "",
@@ -250,6 +262,21 @@ def main() -> int:
         "finished_at": "",
         "forbidden_actions": [],
         "limitations": [],
+        "run_contract": {
+            "authorized_origins": [args.url] if args.url else [],
+            "allowed_actions": ["read-only recon"],
+            "forbidden_actions": [],
+            "mutation_budget": "",
+            "data_classification": "synthetic test data only",
+            "evidence_retention": "retain workspace until handoff",
+            "time_anchor": {
+                "clock": started,
+                "user_timezone": "",
+                "tenant_timezone": "",
+                "can_freeze_time": False,
+            },
+            "end_state": "All QA_ fixtures deleted or archived; config restored; no outbound messages.",
+        },
         "workspace_version": SCHEMA_VERSION,
     }
     write_json(workspace / "meta.json", meta)
@@ -274,7 +301,7 @@ def main() -> int:
     write_json(workspace / "06-defects.json", {"defects": []})
     write_json(
         workspace / "07-fixtures-and-config-ledger.json",
-        {"fixtures": [], "config_changes": []},
+        {"fixtures": [], "config_changes": [], "configuration_matrix": []},
     )
     write_json(workspace / "08-open-questions.json", {"items": []})
     write_text(workspace / "calc" / "README.md", CALC_README)
