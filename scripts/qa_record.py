@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from qa_common import (
+    ATLAS_COVERAGE_MODES,
     CATEGORIES,
     CONFIDENCES,
     CONTROLS,
     DEFECT_STATUSES,
     DEFECT_TYPES,
+    DEPTHS,
+    EXECUTION_MODES,
     FIXTURE_DESIGNS,
     ORACLE_FAMILIES,
     PRIORITIES,
@@ -35,17 +38,6 @@ from qa_common import (
     read_json,
     write_json_atomic,
 )
-
-PREFIX_MAP = {
-    "control": ("02-field-atlas.json", "controls", "A"),
-    "relationship": ("03-relationships.json", "relationships", "R"),
-    "case": ("05-test-cases.json", "test_cases", "TC"),
-    "defect": ("06-defects.json", "defects", "DEF"),
-    "fixture": ("07-fixtures-and-config-ledger.json", "fixtures", "F"),
-    "config_change": ("07-fixtures-and-config-ledger.json", "config_changes", "C"),
-    "config_matrix": ("07-fixtures-and-config-ledger.json", "configuration_matrix", "CFG"),
-    "question": ("08-open-questions.json", "items", "Q"),
-}
 
 
 def _load_doc(path: Path, default_data: dict) -> dict:
@@ -110,6 +102,7 @@ def _sync_case_links(workspace: Path, case: dict) -> None:
     case_id = as_text(case.get("id"))
     atlas_ids = {as_text(x) for x in as_list(case.get("atlas_ids")) if as_text(x)}
     rel_ids = {as_text(x) for x in as_list(case.get("relationship_ids")) if as_text(x)}
+    cfg_ids = {as_text(x) for x in as_list(case.get("config_matrix_ids")) if as_text(x)}
 
     if atlas_ids:
         atlas_path = workspace / "02-field-atlas.json"
@@ -136,6 +129,19 @@ def _sync_case_links(workspace: Path, case: dict) -> None:
                     changed = True
         if changed:
             write_json_atomic(rel_path, rel_doc)
+
+    if cfg_ids:
+        ledger_path = workspace / "07-fixtures-and-config-ledger.json"
+        ledger_doc = _load_doc(ledger_path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
+        changed = False
+        for entry in ledger_doc["configuration_matrix"]:
+            if isinstance(entry, dict) and as_text(entry.get("id")) in cfg_ids:
+                updated = _append_unique(entry.get("tested_by"), case_id)
+                if updated != entry.get("tested_by"):
+                    entry["tested_by"] = updated
+                    changed = True
+        if changed:
+            write_json_atomic(ledger_path, ledger_doc)
 
 
 def cmd_add_controls(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -245,7 +251,7 @@ def cmd_add_cases(workspace: Path, args: argparse.Namespace) -> list[str]:
     items = _read_batch_payload(args)
     if items is None:
         oracle = None
-        if args.oracle_type or args.oracle_source or args.oracle_description:
+        if args.oracle_type or args.oracle_source or args.oracle_description or args.oracle_family:
             oracle = {
                 "type": args.oracle_type,
                 "source": args.oracle_source,
@@ -281,6 +287,7 @@ def cmd_add_cases(workspace: Path, args: argparse.Namespace) -> list[str]:
             "correlated_modules": args.correlated_module or [],
             "relationship_ids": args.relationship_id or [],
             "atlas_ids": args.atlas_id or [],
+            "config_matrix_ids": args.config_matrix_id or [],
             "surfaces_checked": args.surface or [],
             "evidence": args.evidence or [],
             "suggestion": args.suggestion,
@@ -313,25 +320,46 @@ def cmd_add_cases(workspace: Path, args: argparse.Namespace) -> list[str]:
 def cmd_update_case(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "05-test-cases.json"
     doc = _load_doc(path, {"test_cases": []})
-    target = next((c for c in doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id")) == args.id), None)
-    if target is None:
-        raise SystemExit(f"ERROR: Test case '{args.id}' not found.")
+    by_id = {as_text(c.get("id")): c for c in doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id"))}
 
-    patch = _read_batch_payload(args)
-    if patch is not None:
-        if len(patch) != 1:
-            raise SystemExit("ERROR: update-case expects a single JSON object.")
-        target.update(patch[0])
-        target["id"] = args.id
+    patches = _read_batch_payload(args)
+    updated_targets: list[dict] = []
+    if patches is not None:
+        for patch in patches:
+            cid = as_text(patch.get("id")) or as_text(args.id)
+            if not cid:
+                raise SystemExit("ERROR: update-case JSON payload requires 'id' (or --id).")
+            target = by_id.get(cid)
+            if target is None:
+                raise SystemExit(f"ERROR: Test case '{cid}' not found.")
+            target.update(patch)
+            target["id"] = cid
+            _validate_case_fields(target)
+            updated_targets.append(target)
     else:
+        if not args.id:
+            raise SystemExit("ERROR: update-case requires --id when not using --stdin/--file.")
+        target = by_id.get(args.id)
+        if target is None:
+            raise SystemExit(f"ERROR: Test case '{args.id}' not found.")
         if args.status:
             target["status"] = args.status
+        if args.expected is not None:
+            target["expected"] = args.expected
         if args.actual is not None:
             target["actual"] = args.actual
         if args.severity:
             target["severity"] = args.severity
         if args.defect_type:
             target["defect_type"] = args.defect_type
+        if args.step:
+            target["steps"] = list(args.step)
+        if args.atlas_id:
+            target["atlas_ids"] = list(args.atlas_id)
+        if args.relationship_id:
+            target["relationship_ids"] = list(args.relationship_id)
+        if args.config_matrix_id:
+            target["config_matrix_ids"] = list(args.config_matrix_id)
         if args.evidence:
             target["evidence"] = list(args.evidence)
         if args.surface:
@@ -344,6 +372,19 @@ def cmd_update_case(workspace: Path, args: argparse.Namespace) -> list[str]:
             target["executed_at"] = args.executed_at
         elif args.status in ("Pass", "Fail") and not target.get("executed_at"):
             target["executed_at"] = now_iso()
+        if args.oracle_type or args.oracle_source or args.oracle_description or args.oracle_family:
+            oracle = target.get("oracle") if isinstance(target.get("oracle"), dict) else {}
+            if args.oracle_type:
+                oracle["type"] = args.oracle_type
+            if args.oracle_source:
+                oracle["source"] = args.oracle_source
+            if args.oracle_confidence:
+                oracle["confidence"] = args.oracle_confidence
+            if args.oracle_family:
+                oracle["families"] = list(args.oracle_family)
+            if args.oracle_description:
+                oracle["description"] = args.oracle_description
+            target["oracle"] = oracle
         if args.triage_disposition or args.triage_reason:
             triage = target.get("triage") if isinstance(target.get("triage"), dict) else {}
             if args.triage_disposition:
@@ -353,11 +394,13 @@ def cmd_update_case(workspace: Path, args: argparse.Namespace) -> list[str]:
             if args.triage_evidence:
                 triage["evidence"] = list(args.triage_evidence)
             target["triage"] = triage
+        _validate_case_fields(target)
+        updated_targets.append(target)
 
-    _validate_case_fields(target)
     write_json_atomic(path, doc)
-    _sync_case_links(workspace, target)
-    return [args.id]
+    for target in updated_targets:
+        _sync_case_links(workspace, target)
+    return [as_text(t.get("id")) for t in updated_targets]
 
 
 def cmd_add_defects(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -531,18 +574,41 @@ def cmd_log_config(workspace: Path, args: argparse.Namespace) -> list[str]:
 def cmd_restore_config(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "07-fixtures-and-config-ledger.json"
     doc = _load_doc(path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
-    target = next((c for c in doc["config_changes"] if isinstance(c, dict) and as_text(c.get("id")) == args.id), None)
-    if target is None:
-        raise SystemExit(f"ERROR: Config change '{args.id}' not found.")
-    target["restored"] = True
-    target["restored_at"] = args.restored_at or now_iso()
-    target["restored_value"] = args.restored_value or target.get("original", "")
-    if args.evidence:
-        target["evidence"] = args.evidence
-    if args.notes:
-        target["notes"] = args.notes
+    by_id = {as_text(c.get("id")): c for c in doc["config_changes"] if isinstance(c, dict) and as_text(c.get("id"))}
+
+    items = _read_batch_payload(args)
+    if items is None:
+        if not args.id:
+            raise SystemExit("ERROR: restore-config requires --id when not using --stdin/--file.")
+        items = [
+            {
+                "id": args.id,
+                "restored_value": args.restored_value,
+                "restored_at": args.restored_at,
+                "evidence": args.evidence,
+                "notes": args.notes,
+            }
+        ]
+
+    restored_ids = []
+    for item in items:
+        cid = as_text(item.get("id")) or as_text(args.id)
+        if not cid:
+            raise SystemExit("ERROR: restore-config entry requires 'id'.")
+        target = by_id.get(cid)
+        if target is None:
+            raise SystemExit(f"ERROR: Config change '{cid}' not found.")
+        target["restored"] = True
+        target["restored_at"] = as_text(item.get("restored_at")) or now_iso()
+        target["restored_value"] = as_text(item.get("restored_value")) or target.get("original", "")
+        if item.get("evidence"):
+            target["evidence"] = item["evidence"]
+        if item.get("notes"):
+            target["notes"] = item["notes"]
+        restored_ids.append(cid)
+
     write_json_atomic(path, doc)
-    return [args.id]
+    return restored_ids
 
 
 def cmd_add_config_matrix(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -622,6 +688,282 @@ def cmd_add_questions(workspace: Path, args: argparse.Namespace) -> list[str]:
     return added_ids
 
 
+def cmd_set_meta(workspace: Path, args: argparse.Namespace) -> list[str]:
+    path = workspace / "meta.json"
+    doc = _load_doc(path, {})
+    patches = _read_batch_payload(args)
+    if patches is not None:
+        if len(patches) != 1:
+            raise SystemExit("ERROR: set-meta expects a single JSON object.")
+        patch = patches[0]
+        if "run_contract" in patch and isinstance(patch["run_contract"], dict) and isinstance(doc.get("run_contract"), dict):
+            rc = dict(doc["run_contract"])
+            rc.update(patch["run_contract"])
+            patch = dict(patch)
+            patch["run_contract"] = rc
+        if "capabilities" in patch and isinstance(patch["capabilities"], dict) and isinstance(doc.get("capabilities"), dict):
+            caps = dict(doc["capabilities"])
+            caps.update(patch["capabilities"])
+            patch = dict(patch)
+            patch["capabilities"] = caps
+        doc.update(patch)
+    else:
+        if args.staging_confirmed:
+            doc["staging_confirmed"] = args.staging_confirmed == "true"
+        if args.version is not None:
+            doc["version"] = args.version
+        if args.scope is not None:
+            doc["scope"] = args.scope
+        if args.in_scope_module:
+            doc["in_scope_modules"] = list(args.in_scope_module)
+            if args.scope is None:
+                doc["scope"] = ", ".join(args.in_scope_module)
+        if args.depth:
+            _validate_enum(args.depth, DEPTHS, "depth")
+            doc["depth"] = args.depth
+        if args.execution_mode:
+            _validate_enum(args.execution_mode, EXECUTION_MODES, "execution_mode")
+            doc["execution_mode"] = args.execution_mode
+        if args.atlas_coverage_mode:
+            _validate_enum(args.atlas_coverage_mode, ATLAS_COVERAGE_MODES, "atlas_coverage_mode")
+            doc["atlas_coverage_mode"] = args.atlas_coverage_mode
+        if args.role:
+            doc["roles"] = list(args.role)
+        if args.host is not None:
+            doc["host"] = args.host
+        if args.browser_tool is not None:
+            doc["browser_tool"] = args.browser_tool
+        if args.locale is not None:
+            doc["locale"] = args.locale
+        if args.finished_at is not None:
+            doc["finished_at"] = now_iso() if args.finished_at == "now" else args.finished_at
+        if args.limitation:
+            doc["limitations"] = list(args.limitation)
+        if args.capability:
+            caps = doc.get("capabilities") if isinstance(doc.get("capabilities"), dict) else {}
+            for entry in args.capability:
+                if "=" not in entry:
+                    raise SystemExit(f"ERROR: --capability must be key=true|false, got '{entry}'.")
+                k, v = entry.split("=", 1)
+                caps[k.strip()] = v.strip().lower() == "true"
+            doc["capabilities"] = caps
+        rc = doc.get("run_contract") if isinstance(doc.get("run_contract"), dict) else {}
+        rc_changed = False
+        if args.authorized_origin:
+            rc["authorized_origins"] = list(args.authorized_origin)
+            rc_changed = True
+        if args.allowed_action:
+            rc["allowed_actions"] = list(args.allowed_action)
+            rc_changed = True
+        if args.forbidden_action:
+            rc["forbidden_actions"] = list(args.forbidden_action)
+            rc_changed = True
+        if args.mutation_budget is not None:
+            rc["mutation_budget"] = args.mutation_budget
+            rc_changed = True
+        if args.end_state is not None:
+            rc["end_state"] = args.end_state
+            rc_changed = True
+        if rc_changed:
+            doc["run_contract"] = rc
+
+    write_json_atomic(path, doc)
+    return ["meta.json"]
+
+
+def cmd_update_defect(workspace: Path, args: argparse.Namespace) -> list[str]:
+    path = workspace / "06-defects.json"
+    doc = _load_doc(path, {"defects": []})
+    by_id = {as_text(d.get("id")): d for d in doc["defects"] if isinstance(d, dict) and as_text(d.get("id"))}
+    patches = _read_batch_payload(args)
+    updated: list[str] = []
+    if patches is not None:
+        for patch in patches:
+            did = as_text(patch.get("id")) or as_text(args.id)
+            if not did:
+                raise SystemExit("ERROR: update-defect JSON payload requires 'id'.")
+            target = by_id.get(did)
+            if target is None:
+                raise SystemExit(f"ERROR: Defect '{did}' not found.")
+            target.update(patch)
+            target["id"] = did
+            _validate_enum(as_text(target.get("severity")), SEVERITIES, "severity")
+            _validate_enum(as_text(target.get("type")), DEFECT_TYPES, "defect type")
+            _validate_enum(as_text(target.get("status") or "Open"), DEFECT_STATUSES, "defect status")
+            updated.append(did)
+    else:
+        if not args.id:
+            raise SystemExit("ERROR: update-defect requires --id when not using --stdin/--file.")
+        target = by_id.get(args.id)
+        if target is None:
+            raise SystemExit(f"ERROR: Defect '{args.id}' not found.")
+        if args.status:
+            _validate_enum(args.status, DEFECT_STATUSES, "defect status")
+            target["status"] = args.status
+        if args.severity:
+            _validate_enum(args.severity, SEVERITIES, "severity")
+            target["severity"] = args.severity
+        if args.notes is not None:
+            target["notes"] = args.notes
+        if args.workaround is not None:
+            target["workaround"] = args.workaround
+        if args.impact is not None:
+            target["impact"] = args.impact
+        if args.likely_cause is not None:
+            target["likely_cause"] = args.likely_cause
+        if args.suggestion is not None:
+            target["suggestion"] = args.suggestion
+        updated.append(args.id)
+
+    write_json_atomic(path, doc)
+    return updated
+
+
+def cmd_update_fixture(workspace: Path, args: argparse.Namespace) -> list[str]:
+    path = workspace / "07-fixtures-and-config-ledger.json"
+    doc = _load_doc(path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
+    by_id = {as_text(f.get("id")): f for f in doc["fixtures"] if isinstance(f, dict) and as_text(f.get("id"))}
+    patches = _read_batch_payload(args)
+    updated: list[str] = []
+    if patches is not None:
+        for patch in patches:
+            fid = as_text(patch.get("id")) or as_text(args.id)
+            if not fid:
+                raise SystemExit("ERROR: update-fixture JSON payload requires 'id'.")
+            target = by_id.get(fid)
+            if target is None:
+                raise SystemExit(f"ERROR: Fixture '{fid}' not found.")
+            target.update(patch)
+            target["id"] = fid
+            if target.get("design"):
+                _validate_enum(as_text(target.get("design")), FIXTURE_DESIGNS, "fixture design")
+            updated.append(fid)
+    else:
+        if not args.id:
+            raise SystemExit("ERROR: update-fixture requires --id when not using --stdin/--file.")
+        target = by_id.get(args.id)
+        if target is None:
+            raise SystemExit(f"ERROR: Fixture '{args.id}' not found.")
+        if args.status is not None:
+            target["status"] = args.status
+        if args.cleanup is not None:
+            target["cleanup"] = args.cleanup
+        if args.notes is not None:
+            target["notes"] = args.notes
+        if args.purpose is not None:
+            target["purpose"] = args.purpose
+        if args.design:
+            _validate_enum(args.design, FIXTURE_DESIGNS, "fixture design")
+            target["design"] = args.design
+        updated.append(args.id)
+
+    write_json_atomic(path, doc)
+    return updated
+
+
+def cmd_update_question(workspace: Path, args: argparse.Namespace) -> list[str]:
+    path = workspace / "08-open-questions.json"
+    doc = _load_doc(path, {"items": []})
+    by_id = {as_text(q.get("id")): q for q in doc["items"] if isinstance(q, dict) and as_text(q.get("id"))}
+    patches = _read_batch_payload(args)
+    updated: list[str] = []
+    if patches is not None:
+        for patch in patches:
+            qid = as_text(patch.get("id")) or as_text(args.id)
+            if not qid:
+                raise SystemExit("ERROR: update-question JSON payload requires 'id'.")
+            target = by_id.get(qid)
+            if target is None:
+                raise SystemExit(f"ERROR: Question '{qid}' not found.")
+            target.update(patch)
+            target["id"] = qid
+            _validate_enum(as_text(target.get("type")), QUESTION_TYPES, "question type")
+            _validate_enum(as_text(target.get("status") or "Open"), QUESTION_STATUSES, "question status")
+            updated.append(qid)
+    else:
+        if not args.id:
+            raise SystemExit("ERROR: update-question requires --id when not using --stdin/--file.")
+        target = by_id.get(args.id)
+        if target is None:
+            raise SystemExit(f"ERROR: Question '{args.id}' not found.")
+        if args.status:
+            _validate_enum(args.status, QUESTION_STATUSES, "question status")
+            target["status"] = args.status
+        if args.impact is not None:
+            target["impact"] = args.impact
+        if args.owner is not None:
+            target["owner"] = args.owner
+        if args.description is not None:
+            target["description"] = args.description
+        if args.related:
+            target["related"] = list(args.related)
+        updated.append(args.id)
+
+    write_json_atomic(path, doc)
+    return updated
+
+
+def cmd_import_guided(workspace: Path, args: argparse.Namespace) -> list[str]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise SystemExit(f"ERROR: openpyxl is required for import-guided: {exc}")
+
+    xlsx_path = Path(args.file).expanduser().resolve()
+    if not xlsx_path.is_file():
+        raise SystemExit(f"ERROR: Guided workbook not found: {xlsx_path}")
+
+    wb = load_workbook(xlsx_path, data_only=True)
+    ws = wb["Guided Execution"] if "Guided Execution" in wb.sheetnames else wb.active
+    headers = [as_text(cell.value) for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+    col_map = {name: idx for idx, name in enumerate(headers) if name}
+
+    id_col = col_map.get("Case ID", 0)
+    actual_col = col_map.get("Observed Actual Result (Fill In)", 10)
+    status_col = col_map.get("Status (Fill In)", 11)
+    notes_col = col_map.get("Tester Notes / Error Text", 12)
+
+    cases_path = workspace / "05-test-cases.json"
+    doc = _load_doc(cases_path, {"test_cases": []})
+    by_id = {as_text(c.get("id")): c for c in doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id"))}
+
+    updated_ids: list[str] = []
+    updated_cases: list[dict] = []
+    stamp = now_iso()
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        cid = as_text(row[id_col] if id_col < len(row) else "")
+        if not cid:
+            continue
+        status = as_text(row[status_col] if status_col < len(row) else "")
+        actual = as_text(row[actual_col] if actual_col < len(row) else "")
+        notes = as_text(row[notes_col] if notes_col < len(row) else "")
+        if not status and not actual and not notes:
+            continue
+
+        target = by_id.get(cid)
+        if target is None:
+            raise SystemExit(f"ERROR: Guided sheet Case ID '{cid}' not found in 05-test-cases.json.")
+        if status:
+            _validate_enum(status, STATUSES, "status")
+            target["status"] = status
+            if status in ("Pass", "Fail") and not target.get("executed_at"):
+                target["executed_at"] = stamp
+        if actual:
+            target["actual"] = actual
+        if notes:
+            target["notes"] = notes
+        _validate_case_fields(target)
+        updated_ids.append(cid)
+        updated_cases.append(target)
+
+    if updated_ids:
+        write_json_atomic(cases_path, doc)
+        for tc in updated_cases:
+            _sync_case_links(workspace, tc)
+    return updated_ids
+
+
 def _add_batch_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--stdin", action="store_true", help="Read a JSON object or array from stdin")
     p.add_argument("--file", default="", help="Read a JSON object or array from a file")
@@ -631,6 +973,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Atomically record items in a blackbox-ui-qa v2.0 workspace.")
     parser.add_argument("workspace", help="Workspace directory")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_meta = sub.add_parser("set-meta", help="Update meta.json intake, capabilities, or completion fields")
+    _add_batch_flags(p_meta)
+    p_meta.add_argument("--staging-confirmed", choices=["true", "false"], default="")
+    p_meta.add_argument("--version", default=None)
+    p_meta.add_argument("--scope", default=None)
+    p_meta.add_argument("--in-scope-module", action="append")
+    p_meta.add_argument("--depth", default="")
+    p_meta.add_argument("--execution-mode", default="")
+    p_meta.add_argument("--atlas-coverage-mode", default="")
+    p_meta.add_argument("--role", action="append")
+    p_meta.add_argument("--host", default=None)
+    p_meta.add_argument("--browser-tool", default=None)
+    p_meta.add_argument("--locale", default=None)
+    p_meta.add_argument("--finished-at", default=None, help="ISO timestamp or 'now'")
+    p_meta.add_argument("--limitation", action="append")
+    p_meta.add_argument("--capability", action="append", help="key=true|false")
+    p_meta.add_argument("--authorized-origin", action="append")
+    p_meta.add_argument("--allowed-action", action="append")
+    p_meta.add_argument("--forbidden-action", action="append")
+    p_meta.add_argument("--mutation-budget", default=None)
+    p_meta.add_argument("--end-state", default=None)
 
     p_ctrl = sub.add_parser("add-control", help="Add one or more controls to 02-field-atlas.json")
     _add_batch_flags(p_ctrl)
@@ -691,6 +1055,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_case.add_argument("--correlated-module", action="append")
     p_case.add_argument("--relationship-id", action="append")
     p_case.add_argument("--atlas-id", action="append")
+    p_case.add_argument("--config-matrix-id", action="append")
     p_case.add_argument("--surface", action="append")
     p_case.add_argument("--evidence", action="append")
     p_case.add_argument("--suggestion", default="")
@@ -700,13 +1065,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_case.add_argument("--triage-evidence", action="append")
     p_case.add_argument("--executed-at", default="")
 
-    p_ucase = sub.add_parser("update-case", help="Update execution result of an existing test case")
+    p_ucase = sub.add_parser("update-case", help="Update execution result of one or more existing test cases")
     _add_batch_flags(p_ucase)
-    p_ucase.add_argument("--id", required=True)
+    p_ucase.add_argument("--id", default="")
     p_ucase.add_argument("--status", default="")
+    p_ucase.add_argument("--expected", default=None)
     p_ucase.add_argument("--actual", default=None)
     p_ucase.add_argument("--severity", default="")
     p_ucase.add_argument("--defect-type", default="")
+    p_ucase.add_argument("--step", action="append")
+    p_ucase.add_argument("--atlas-id", action="append")
+    p_ucase.add_argument("--relationship-id", action="append")
+    p_ucase.add_argument("--config-matrix-id", action="append")
+    p_ucase.add_argument("--oracle-type", default="")
+    p_ucase.add_argument("--oracle-source", default="")
+    p_ucase.add_argument("--oracle-confidence", default="")
+    p_ucase.add_argument("--oracle-family", action="append")
+    p_ucase.add_argument("--oracle-description", default="")
     p_ucase.add_argument("--evidence", action="append")
     p_ucase.add_argument("--surface", action="append")
     p_ucase.add_argument("--suggestion", default=None)
@@ -739,6 +1114,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_def.add_argument("--status", default="Open")
     p_def.add_argument("--notes", default="")
 
+    p_udef = sub.add_parser("update-defect", help="Update an existing defect in 06-defects.json")
+    _add_batch_flags(p_udef)
+    p_udef.add_argument("--id", default="")
+    p_udef.add_argument("--status", default="")
+    p_udef.add_argument("--severity", default="")
+    p_udef.add_argument("--impact", default=None)
+    p_udef.add_argument("--likely-cause", default=None)
+    p_udef.add_argument("--suggestion", default=None)
+    p_udef.add_argument("--workaround", default=None)
+    p_udef.add_argument("--notes", default=None)
+
     p_fix = sub.add_parser("add-fixture", help="Add one or more fixtures to 07-fixtures-and-config-ledger.json")
     _add_batch_flags(p_fix)
     p_fix.add_argument("--id", default="")
@@ -749,6 +1135,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_fix.add_argument("--status", default="active")
     p_fix.add_argument("--cleanup", default="")
     p_fix.add_argument("--notes", default="")
+
+    p_ufix = sub.add_parser("update-fixture", help="Update fixture lifecycle status or cleanup notes")
+    _add_batch_flags(p_ufix)
+    p_ufix.add_argument("--id", default="")
+    p_ufix.add_argument("--status", default=None)
+    p_ufix.add_argument("--cleanup", default=None)
+    p_ufix.add_argument("--notes", default=None)
+    p_ufix.add_argument("--purpose", default=None)
+    p_ufix.add_argument("--design", default="")
 
     p_cfg = sub.add_parser("log-config", help="Log a config change before mutating settings")
     _add_batch_flags(p_cfg)
@@ -763,8 +1158,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_cfg.add_argument("--evidence", default="")
     p_cfg.add_argument("--notes", default="")
 
-    p_rcfg = sub.add_parser("restore-config", help="Mark a logged config change as restored")
-    p_rcfg.add_argument("--id", required=True)
+    p_rcfg = sub.add_parser("restore-config", help="Mark one or more logged config changes as restored")
+    _add_batch_flags(p_rcfg)
+    p_rcfg.add_argument("--id", default="")
     p_rcfg.add_argument("--restored-value", default="")
     p_rcfg.add_argument("--restored-at", default="")
     p_rcfg.add_argument("--evidence", default="")
@@ -791,6 +1187,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_q.add_argument("--status", default="Open")
     p_q.add_argument("--related", action="append")
 
+    p_uq = sub.add_parser("update-question", help="Update status or details of an open question")
+    _add_batch_flags(p_uq)
+    p_uq.add_argument("--id", default="")
+    p_uq.add_argument("--status", default="")
+    p_uq.add_argument("--impact", default=None)
+    p_uq.add_argument("--owner", default=None)
+    p_uq.add_argument("--description", default=None)
+    p_uq.add_argument("--related", action="append")
+
+    p_ig = sub.add_parser("import-guided", help="Import human-filled Guided_Execution_*.xlsx results")
+    p_ig.add_argument("--file", required=True, help="Path to filled Guided_Execution_*.xlsx")
+
     return parser
 
 
@@ -803,16 +1211,21 @@ def main() -> int:
         return 1
 
     dispatch = {
+        "set-meta": cmd_set_meta,
         "add-control": cmd_add_controls,
         "add-relationship": cmd_add_relationships,
         "add-case": cmd_add_cases,
         "update-case": cmd_update_case,
         "add-defect": cmd_add_defects,
+        "update-defect": cmd_update_defect,
         "add-fixture": cmd_add_fixtures,
+        "update-fixture": cmd_update_fixture,
         "log-config": cmd_log_config,
         "restore-config": cmd_restore_config,
         "add-config-matrix": cmd_add_config_matrix,
         "add-question": cmd_add_questions,
+        "update-question": cmd_update_question,
+        "import-guided": cmd_import_guided,
     }
     ids = dispatch[args.command](workspace, args)
     print(json.dumps({"ok": True, "command": args.command, "ids": ids}))

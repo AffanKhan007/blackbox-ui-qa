@@ -137,6 +137,14 @@ def populate(workspace: Path) -> None:
     )
 
     write_text(
+        workspace / "01-app-map.md",
+        "# App map & state ledger\n\n"
+        "| State ID | Path | Role | Signature | Status (todo/visited/unreached) | Console/Net Errors | Notes |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| S-001 | Orders > Detail | Admin | /orders/detail | visited | none | Demo state |\n"
+        "| S-002 | Customers > Summary | Admin, Viewer | /customers | visited | none | Demo state |\n",
+    )
+    write_text(
         workspace / "03-rules.md",
         "# Demo rules\n\n"
         "- RULE-001 IF Order.status == Confirmed THEN excluded from Customer Open orders.\n"

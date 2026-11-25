@@ -92,13 +92,32 @@ def main() -> int:
             if not (ROOT / "references" / fname).exists():
                 fail(f"{ref_file.name} references non-existent file '{fname}'")
 
-    for relative in sorted(set(re.findall(r"scripts/[A-Za-z0-9_.-]+\.py", text))):
+    for relative in sorted(set(re.findall(r"scripts/[A-Za-z0-9_.-]+\.(?:py|js)", text))):
         if not (ROOT / relative).exists():
             fail(f"referenced script does not exist: {relative}")
 
-    for required in ["README.md", "LICENSE", "CHANGELOG.md", "install.sh", "install.ps1", "requirements.txt"]:
+    for required in [
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        "install.sh",
+        "install.ps1",
+        "requirements.txt",
+        "scripts/browser_probes.js",
+        "scripts/qa_diff.py",
+        "evals/gym/server.py",
+        "evals/gym/ground_truth.json",
+        "evals/score_gym_run.py",
+    ]:
         if not (ROOT / required).exists():
             fail(f"missing repository file: {required}")
+
+    install_sh = (ROOT / "install.sh").read_text(encoding="utf-8")
+    install_ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    if "*.js" not in install_sh:
+        fail("install.sh must copy scripts/*.js")
+    if "*.js" not in install_ps1:
+        fail("install.ps1 must copy scripts\\*.js")
 
     print(f"References: {len(referenced)} linked files; {len(evals_data.get('evals') or [])} behavioral evals.")
     print("Skill package checks passed.")

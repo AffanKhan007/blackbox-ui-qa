@@ -28,6 +28,7 @@ qa-<app>-<timestamp>/
 │   ├── outputs/
 │   └── security/
 ├── calc/                                # External Python verification scripts
+├── DEFECTS.md                           # Severity-sorted, copy-pasteable defect tickets
 └── QA_Report_<app>_<timestamp>.xlsx
 ```
 
@@ -35,25 +36,30 @@ JSON files are the sole source of truth for validation and workbook generation.
 
 ## 2. Recording Incrementally with `qa_record.py`
 
-Prefer `qa_record.py` over editing large JSON files manually. Every mutating subcommand supports single-item CLI flags OR batch JSON via `--stdin` / `--file` (PowerShell-safe for multi-line strings and bulk inserts), auto-assigns sequential IDs, validates enums, and atomically updates cross-links (`atlas_ids` -> `tested_by`, `relationship_ids` -> `verified_by`).
+Prefer `qa_record.py` over editing JSON files manually. Every mutating subcommand supports single-item CLI flags OR batch JSON via `--stdin` / `--file` (PowerShell-safe for multi-line strings and bulk inserts), auto-assigns sequential IDs, validates enums, and atomically updates cross-links (`atlas_ids` -> `tested_by`, `relationship_ids` -> `verified_by`, `config_matrix_ids` -> `configuration_matrix[].tested_by`).
 
 ```bash
+# Set intake / completion metadata without hand-editing meta.json
+python "<skill-dir>/scripts/qa_record.py" <ws> set-meta --staging-confirmed true --role Admin --role Viewer
+
 # Single control or test case via CLI flags
 python "<skill-dir>/scripts/qa_record.py" <ws> add-control --state-id S-001 --module Payroll --path "Payroll > Run" --label "Net pay" --control computed
 python "<skill-dir>/scripts/qa_record.py" <ws> add-case --module Payroll --path "Payroll > Run" --title "Net pay matches calc" --status Pass --expected "8,500.00" --actual "8,500.00" --evidence evidence/screenshots/TC-0001.png --atlas-id A-0001
 
-# Batch insert via --stdin or --file (ideal on Windows PowerShell)
+# Batch insert/update via --stdin or --file (ideal on Windows PowerShell)
 python "<skill-dir>/scripts/qa_record.py" <ws> add-case --file batch_cases.json
+python "<skill-dir>/scripts/qa_record.py" <ws> import-guided --file Guided_Execution_app.xlsx
 
-# Log and restore configuration changes
+# Log and restore configuration changes; update cleanup/resolution status
 python "<skill-dir>/scripts/qa_record.py" <ws> log-config --path "Settings > Loans" --setting Cap --original 30 --changed-to 10 --role Admin --reason "Perturbation"
 python "<skill-dir>/scripts/qa_record.py" <ws> restore-config --id C-0001 --restored-value 30 --evidence evidence/snapshots/C-0001.txt
+python "<skill-dir>/scripts/qa_record.py" <ws> update-fixture --id F-0001 --status deleted --cleanup "Deleted via UI"
 
 # Seed a defect directly from a failed test case
 python "<skill-dir>/scripts/qa_record.py" <ws> add-defect --from-case TC-0002 --impact "Employee underpaid" --likely-cause "Cap applied to gross (hypothesis)"
 ```
 
-Supported subcommands: `add-control`, `add-relationship`, `add-case`, `update-case`, `add-defect`, `add-fixture`, `log-config`, `restore-config`, `add-config-matrix`, `add-question`.
+Supported subcommands: `set-meta`, `add-control`, `add-relationship`, `add-case`, `update-case`, `add-defect`, `update-defect`, `add-fixture`, `update-fixture`, `log-config`, `restore-config`, `add-config-matrix`, `add-question`, `update-question`, `import-guided`.
 
 ## 3. Shared Vocabularies
 
@@ -142,14 +148,15 @@ Required: `id`, `type`, `description`. Optional: `impact`, `owner`, `status` (`O
 ## 5. Validation Rules & Report Generation
 
 `validate_workspace.py` and `build_report.py` enforce:
-- **Blocking errors:** invalid JSON/schema version (`!= "2.0"`), duplicate IDs (including `configuration_matrix`), bad enums, broken cross-references, missing `Pass`/`Fail` evidence or non-existent/escaping evidence paths, `Fail` missing `steps`/`severity`/`defect_type`/`triage`/`suggestion`/linked defect, `Defect` triage on non-`Fail`, `Blocked`/`Not Run` without explanation, unexplained `relationships` or `configuration_matrix` rows, `profile_value` outside `options`, `uncovered_control` when `depth == "Exhaustive"` or `atlas_coverage_mode == "full"`, `in_scope_modules` without cases, `restored: false` without `notes`, and any non-placeholder credential/token/password across workspace text files (including `.html`, `.htm`, `.har`, `.xml`, `.svg`).
-- **Warnings:** unconfirmed staging, incomplete `run_contract`, `time_anchor.can_freeze_time` mismatch with `capabilities`, missing `Deep`/`Exhaustive` `calc/` reference or missing cross-module relationships when multiple modules are in scope, `defect.module` containing `>`, untested configured `roles`, open `Assumption`/`Conflict`, `Needs Clarification`/`Observation` without explanation.
+- **Blocking errors:** invalid JSON/schema version (`!= "2.0"`), duplicate IDs (including `configuration_matrix`), bad enums, broken cross-references, missing `Pass`/`Fail` evidence, non-existent/escaping/empty (`0`-byte) evidence paths, `Fail` missing `steps`/`severity`/`defect_type`/`triage`/`suggestion`/linked defect, `Defect` triage on non-`Fail`, `Blocked`/`Not Run` without explanation, unexplained `relationships` or `configuration_matrix` rows, `profile_value` outside `options`, `uncovered_control` when `depth == "Exhaustive"` or `atlas_coverage_mode == "full"`, `in_scope_modules` without cases, `restored: false` without `notes`, and any non-placeholder credential/token/password across workspace text files (including `.html`, `.htm`, `.har`, `.xml`, `.svg`).
+- **Warnings:** unconfirmed staging, incomplete `run_contract`, `time_anchor.can_freeze_time` mismatch with `capabilities`, missing `Deep`/`Exhaustive` `calc/` reference or missing cross-module relationships when multiple modules are in scope, untouched `01-app-map.md` template in `Deep`/`Exhaustive` runs, `defect.module` containing `>`, untested configured `roles`, open `Assumption`/`Conflict`, `Needs Clarification`/`Observation` without explanation.
 
 **Building deliverables:**
-- Standard report (8 sheets: `Summary`, `Test Cases`, `Defects`, `Coverage` [5 tables: By module, Module traceability, By category, Relationships, Role coverage], `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`):
+- Standard report (8 sheets: `Summary`, `Test Cases`, `Defects`, `Coverage` [5 tables: By module, Module traceability, By category, Relationships, Role coverage], `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`) plus developer-ready `DEFECTS.md` (pass `--no-defects-md` to skip):
   `python "<skill-dir>/scripts/build_report.py" <workspace>`
 - Draft with errors marked: pass `--allow-incomplete`. Strict CI check: `--strict`.
-- Guided execution workbook (human tester runbook): pass `--guided-sheet`.
+- Guided execution workbook (human tester runbook): pass `--guided-sheet`, and ingest completed runs via `qa_record.py import-guided --file <xlsx>`.
+- Release-over-release regression diff: `python "<skill-dir>/scripts/qa_diff.py" <baseline_ws> <current_ws>`.
 
 ## 6. Chat Handoff Format
 

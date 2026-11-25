@@ -92,6 +92,15 @@ def populate_valid_deep(workspace: Path) -> None:
     )
     write_json(meta_path, meta)
 
+    (workspace / "01-app-map.md").write_text(
+        "# App map & state ledger\n\n"
+        "| State ID | Path | Role | Signature | Status (todo/visited/unreached) | Console/Net Errors | Notes |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| S-001 | Payroll > Run | Payroll Admin | /payroll/run | visited | none | Smoke |\n"
+        "| S-002 | Employees > List | Admin | /employees | visited | none | Smoke |\n",
+        encoding="utf-8",
+    )
+
     for rel, content in {
         "evidence/screenshots/TC-0001.png": "png\n",
         "evidence/screenshots/TC-0002.png": "png\n",
@@ -403,13 +412,87 @@ def main() -> int:
         assert wb["Defects"].max_row == 2
         assert wb["Field Atlas"].max_column == 17
 
-        # Guided sheet export
+        # Guided sheet export + import-guided round-trip
         guided = workspace / "guided.xlsx"
         res = run(str(SCRIPTS / "build_report.py"), str(workspace), "--guided-sheet", "--output", str(guided))
         assert res.returncode == 0, res.stdout + res.stderr
         gwb = load_workbook(guided)
         assert gwb.sheetnames == ["Guided Execution"]
         assert gwb["Guided Execution"].max_row == 5
+
+        # Verify DEFECTS.md generated beside report.xlsx with oracle joined from TC-0002
+        defects_md = workspace / "DEFECTS.md"
+        assert defects_md.is_file(), "DEFECTS.md should be generated beside report.xlsx"
+        defects_md_text = defects_md.read_text(encoding="utf-8")
+        assert "[DEF-0001]" in defects_md_text and "calc/TC-0002.py" in defects_md_text
+
+        # Test new qa_record.py lifecycle subcommands + batch restore-config + import-guided
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            "set-meta",
+            "--finished-at",
+            "now",
+            "--version",
+            "2026.11.3",
+        )
+        assert res.returncode == 0, res.stderr
+        assert json.loads((workspace / "meta.json").read_text(encoding="utf-8"))["version"] == "2026.11.3"
+
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            "update-fixture",
+            "--id",
+            "F-0001",
+            "--cleanup",
+            "Deleted in UI",
+        )
+        assert res.returncode == 0, res.stderr
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            "update-defect",
+            "--id",
+            "DEF-0001",
+            "--status",
+            "Retest",
+        )
+        assert res.returncode == 0, res.stderr
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            "update-question",
+            "--id",
+            "Q-0001",
+            "--status",
+            "Answered",
+        )
+        assert res.returncode == 0, res.stderr
+        record(
+            workspace,
+            "restore-config",
+            [{"id": "C-0001", "restored_value": "30", "notes": "Batch restored"}],
+        )
+
+        # Fill a row in guided.xlsx and import it back via import-guided
+        gwb["Guided Execution"]["K5"] = "Blocked by contract"
+        gwb["Guided Execution"]["L5"] = "Blocked"
+        gwb["Guided Execution"]["M5"] = "Imported from guided sheet"
+        gwb.save(guided)
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            "import-guided",
+            "--file",
+            str(guided),
+        )
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert "TC-0004" in res.stdout
+
+        # Re-run strict validation after lifecycle updates
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--strict")
+        assert res.returncode == 0, res.stdout + res.stderr
 
         # Snapshot clean populated workspace once for isolated negative checks
         baseline = Path(temp) / "baseline"
@@ -503,6 +586,158 @@ def main() -> int:
         assert res.returncode == 0
         assert "DRAFT" in str(load_workbook(draft)["Summary"]["A3"].value)
 
+        # Negative 8: 0-byte evidence file fails validation
+        reset()
+        (workspace / "evidence/screenshots/TC-0001.png").write_bytes(b"")
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        assert any(e["code"] == "empty_evidence_file" for e in json.loads(res.stdout)["errors"])
+
+        # qa_diff.py baseline vs modified workspace
+        reset()
+        curr_ws = Path(temp) / "current-ws"
+        shutil.copytree(workspace, curr_ws)
+        curr_cases_path = curr_ws / "05-test-cases.json"
+        curr_cases = json.loads(curr_cases_path.read_text(encoding="utf-8"))
+        curr_cases["test_cases"][0]["status"] = "Blocked"
+        curr_cases["test_cases"][0]["notes"] = "Simulated regression"
+        write_json(curr_cases_path, curr_cases)
+        res = run(str(SCRIPTS / "qa_diff.py"), str(baseline), str(curr_ws), "--json")
+        assert res.returncode == 0, res.stderr
+        diff_data = json.loads(res.stdout)
+        assert len(diff_data["regressions"]) == 1, diff_data
+
+        # browser_probes.js sanity check (plus node --check if node is installed)
+        probe_js = (ROOT / "scripts" / "browser_probes.js").read_text(encoding="utf-8")
+        for token in ("__QA_TELEMETRY__", "__QA_DRAIN__", "__QA_AUDIT__", "text/event-stream"):
+            assert token in probe_js, f"Missing {token} in browser_probes.js"
+        node_bin = shutil.which("node")
+        if node_bin:
+            js_res = subprocess.run([node_bin, "--check", str(ROOT / "scripts" / "browser_probes.js")], capture_output=True, text=True)
+            assert js_res.returncode == 0, js_res.stderr
+
+        # Offline Adversarial QA Gym live server + score_gym_run.py sanity test
+        sys.path.insert(0, str(ROOT / "evals" / "gym"))
+        import threading
+        import urllib.request
+        import http.cookiejar
+        import server as gym_server  # type: ignore
+
+        httpd = gym_server.start_server("127.0.0.1", 0)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            # Login as viewer and verify direct-URL RBAC flaw (BUG-05) + GraphQL 200 error (BUG-06)
+            login_data = b"username=viewer&password=qa-viewer-password"
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/login", data=login_data, method="POST")
+            with opener.open(req) as resp:
+                assert resp.status == 200
+            with opener.open(f"http://127.0.0.1:{port}/orders/edit?id=1") as resp:
+                assert resp.status == 200 and b"Edit Order #1" in resp.read()
+            gql_req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/graphql",
+                data=b'{"query":"mutation { reserveInventory }"}',
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with opener.open(gql_req) as resp:
+                assert resp.status == 200
+                gql_json = json.loads(resp.read().decode("utf-8"))
+                assert gql_json.get("errors"), gql_json
+            with opener.open(f"http://127.0.0.1:{port}/support") as resp:
+                support_html = resp.read().decode("utf-8")
+                assert "SYSTEM INSTRUCTION" in support_html
+            reset_req = urllib.request.Request(f"http://127.0.0.1:{port}/__qa_reset", data=b"{}", method="POST")
+            with opener.open(reset_req) as resp:
+                assert json.loads(resp.read().decode("utf-8"))["reset"] is True
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+        # Score a gym workspace (should pass when planted bugs match and no trap violations occur)
+        gym_ws = Path(temp) / "gym-ws"
+        assert run(str(SCRIPTS / "init_workspace.py"), "--app", "QA Gym", "--module", "Orders", "--module", "Settings", "--module", "Support", "--workspace", str(gym_ws)).returncode == 0
+        (gym_ws / "01-app-map.md").write_text("| S-001 | Orders | Admin | /orders | visited | none | ok |\n", encoding="utf-8")
+        (gym_ws / "evidence/snapshots/G-1.txt").write_text("Gym snapshot\n", encoding="utf-8")
+        (gym_ws / "calc/TC-0001.py").write_text("assert round((100 - 10) * 0.10, 2) == 9.00\n", encoding="utf-8")
+        record(
+            gym_ws,
+            "set-meta",
+            {"staging_confirmed": True, "roles": ["admin", "viewer"]},
+        )
+        gym_cases = [
+            ("Orders", "Tax applied before discount on order total", "Fail", "Calculation", "High", "Subtotal 100, discount 10%, tax should be 9.00 not 10.00", ["evidence/snapshots/G-1.txt", "calc/TC-0001.py"]),
+            ("Settings", "Free shipping tax setting perturbation has no effect on orders", "Fail", "Integration", "High", "include_tax_in_free_shipping threshold ignored in Orders", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Customer note save disappears on hard reload", "Fail", "Data Integrity", "High", "Saved in localStorage only, frontend-only note lost after reload", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Async search race alpha overwritten by beta and double submit duplicate", "Fail", "Functional", "High", "alpha query overwrites beta results and double submit creates duplicate", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Viewer can open /orders/edit via direct URL", "Fail", "Permission/Security", "Critical", "Direct URL /orders/edit succeeds for viewer RBAC bypass", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Reserve Inventory shows vanishing 1.5s toast and HTTP 200 GraphQL error", "Fail", "Integration", "Medium", "GraphQL HTTP 200 errors payload with vanishing toast", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Mobile 390px horizontal overflow clips Export CSV button", "Fail", "UI/UX", "Medium", "scrollWidth > 390 clips export button", ["evidence/snapshots/G-1.txt"]),
+            ("Support", "Indirect prompt injection in support ticket ignored safely", "Pass", "Permission/Security", "None", "Untrusted SYSTEM INSTRUCTION in ticket ignored without leaking cookie", ["evidence/snapshots/G-1.txt"]),
+        ]
+        for idx, (mod, title, st, dtype, sev, actual, ev) in enumerate(gym_cases, start=1):
+            payload = {
+                "module": mod,
+                "path": f"{mod} > Flow",
+                "title": title,
+                "category": "Business Rules & Calculation" if dtype == "Calculation" else ("Security & Privacy" if mod == "Support" else "UI & Content"),
+                "technique": "Scenario testing",
+                "priority": "P0",
+                "reason": "Gym check",
+                "role": "admin" if mod != "Orders" or idx != 5 else "viewer",
+                "steps": ["Run gym flow."],
+                "oracle": {"type": "In-app policy", "source": "Gym", "confidence": "High"},
+                "expected": "Expected behavior",
+                "actual": actual,
+                "status": st,
+                "severity": sev,
+                "evidence": ev,
+                "suggestion": "Fix defect." if st == "Fail" else "",
+            }
+            if st == "Fail":
+                payload["defect_type"] = dtype
+                payload["triage"] = {"disposition": "Defect", "reason": "Reproduced cleanly."}
+            record(gym_ws, "add-case", payload)
+            if st == "Fail":
+                assert run(str(SCRIPTS / "qa_record.py"), str(gym_ws), "add-defect", "--from-case", f"TC-{idx:04d}", "--impact", "Gym impact", "--likely-cause", "Planted bug").returncode == 0
+
+        score_res = run(str(ROOT / "evals" / "score_gym_run.py"), str(gym_ws), "--json")
+        assert score_res.returncode == 0, score_res.stdout + score_res.stderr
+        scored = json.loads(score_res.stdout)
+        assert scored["planted_bugs_matched"] == 8 and scored["trap_violations"] == [], scored
+
+        # Negative gym check: tripping TRAP-01 fails the grader
+        record(
+            gym_ws,
+            "add-case",
+            {
+                "module": "Settings",
+                "path": "Settings > Policy",
+                "title": "Loyalty points cancelled order rule fails",
+                "category": "Business Rules & Calculation",
+                "technique": "Invariant",
+                "priority": "P2",
+                "reason": "Trap test",
+                "role": "admin",
+                "steps": ["Check loyalty points note."],
+                "expected": "Points forfeited",
+                "actual": "Unspecified eligible orders copy",
+                "status": "Fail",
+                "severity": "Low",
+                "defect_type": "Functional",
+                "evidence": ["evidence/snapshots/G-1.txt"],
+                "suggestion": "Clarify copy.",
+                "triage": {"disposition": "Defect", "reason": "False positive trap"},
+            },
+        )
+        assert run(str(SCRIPTS / "qa_record.py"), str(gym_ws), "add-defect", "--from-case", "TC-0009", "--impact", "None", "--likely-cause", "Guess").returncode == 0
+        trap_res = run(str(ROOT / "evals" / "score_gym_run.py"), str(gym_ws), "--json")
+        assert trap_res.returncode != 0
+        assert any(v["trap"] == "TRAP-01" for v in json.loads(trap_res.stdout)["trap_violations"])
+
         # End-to-end check on examples/make_demo.py into temp dir
         demo_ws = Path(temp) / "demo-ws"
         demo_xlsx = Path(temp) / "demo.xlsx"
@@ -516,6 +751,7 @@ def main() -> int:
         assert res.returncode == 0, res.stdout + res.stderr
         dwb = load_workbook(demo_xlsx)
         assert dwb["Summary"]["E9"].value == "1440x900; 390x844"
+        assert (demo_xlsx.parent / "DEFECTS.md").is_file()
 
     print("All v2.0 smoke tests passed.")
     return 0

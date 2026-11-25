@@ -31,50 +31,13 @@ Apps with WebSockets, SSE streams, analytics heartbeats, or AI token streams **n
 - If an XHR returns 401 or the app redirects to `/login` mid-run, re-authenticate cleanly in that role's context and resume from `00-progress.md` / `01-app-map.md`.
 - Slow down navigation cadence if rate-limited (`429`); if CAPTCHA/MFA triggers, pause and ask the user to solve it directly in the visible browser.
 
-## 3. Copy-Ready JS Runtime Probes (`js_eval`)
+## 3. Deterministic Telemetry & Audit Sensor (`scripts/browser_probes.js`)
 
-When `capabilities.js_eval` is `true`, run these lightweight read-only probes during Stage 1/2:
+When `capabilities.js_eval` is `true`, inject [`scripts/browser_probes.js`](../scripts/browser_probes.js) once per page via Playwright `page.addInitScript(path="<skill-dir>/scripts/browser_probes.js")`—or evaluate its contents in MCP/DevTools `evaluate` (it is idempotent via `window.__QA_TELEMETRY_INSTALLED__`, skips SSE/binary streams so streaming UIs never hang, and redacts `Authorization`/cookies/tokens/passwords before buffering):
 
-### Passive Surface Health Probe (Broken Assets, Overflow, Overlapping Targets)
-```javascript
-(() => {
-  const brokenImages = [...document.images]
-    .filter(i => i.complete && i.naturalWidth === 0)
-    .map(i => i.getAttribute('src') || i.alt || '(unnamed)');
-  const overflowX = document.documentElement.scrollWidth > window.innerWidth;
-  const unlabeledInputs = [...document.querySelectorAll('input,select,textarea')]
-    .filter(el => el.offsetParent !== null && !el.disabled)
-    .filter(el => {
-      const id = el.id;
-      const hasLabel = id && document.querySelector(`label[for="${CSS.escape(id)}"]`);
-      return !hasLabel && !el.closest('label') && !el.getAttribute('aria-label') && !el.getAttribute('aria-labelledby');
-    }).length;
-  return { url: location.href, overflowX, scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, brokenImages, unlabeledInputs };
-})()
-```
-
-### Ephemeral Toast / Alert Observer (Attach Before Save/Delete)
-```javascript
-(() => {
-  window.__qaToasts = window.__qaToasts || [];
-  if (!window.__qaToastObs) {
-    window.__qaToastObs = new MutationObserver(muts => {
-      for (const m of muts) {
-        for (const n of m.addedNodes) {
-          if (n.nodeType !== 1) continue;
-          const text = (n.innerText || '').trim();
-          const role = n.getAttribute?.('role') || '';
-          if (text && (role === 'alert' || role === 'status' || /toast|snack|alert|notif/i.test(n.className || ''))) {
-            window.__qaToasts.push({ ts: new Date().toISOString(), role, text: text.slice(0, 300) });
-          }
-        }
-      }
-    });
-    window.__qaToastObs.observe(document.body, { childList: true, subtree: true });
-  }
-  return window.__qaToasts.splice(0);
-})()
-```
+- **`window.__QA_DRAIN__()`:** Pops buffered `consoleErrors`, `pageErrors`, `unhandledRejections`, `networkFailures` (`status >= 400` or network errors on `fetch`/XHR), `graphqlErrors` (HTTP `200` JSON payloads with top-level `errors`), and transient `toasts` (captured via `MutationObserver` before 1–2s auto-dismiss). Call after every state transition or save/delete action.
+- **`window.__QA_AUDIT__()`:** Returns a read-only DOM & WCAG 2.2 AA snapshot: `overflowX` (`scrollWidth > innerWidth`), `brokenImages`, `unlabeledInputs`, `unlabeledClickables`, `smallTargets` (`< 24x24px`), `obscuredOrClipped` (`elementFromPoint` / offscreen checks), and `duplicateIds`.
+- **`window.__QA_TELEMETRY__`:** Inspect full current ring buffer without draining.
 
 ## 4. Guided Mode (No Browser Tool)
 
@@ -82,7 +45,7 @@ When `capabilities.js_eval` is `true`, run these lightweight read-only probes du
 2. Build `01-app-map.md`, `03-rules.md`, and `05-test-cases.json` from any user screenshots, exports, or walkthroughs (`status: "Not Run"` with reason `"Awaiting guided execution"`).
 3. Generate the human-tester runbook:
    `python "<skill-dir>/scripts/build_report.py" <workspace> --guided-sheet`
-4. Incorporate user-returned screenshots/text via `qa_record.py update-case`, never fabricating unprovided Pass/Fail verdicts.
+4. Incorporate user-returned execution sheets via `qa_record.py import-guided <workspace> --file Guided_Execution_*.xlsx` (or `update-case`), never fabricating unprovided Pass/Fail verdicts.
 
 ## 5. Parallel Subagents & Security Boundaries
 

@@ -105,6 +105,9 @@ install_one() {
   cp "$SRC_DIR/SKILL.md" "$dest/SKILL.md"
   cp "$SRC_DIR/references/"*.md "$dest/references/"
   cp "$SRC_DIR/scripts/"*.py "$dest/scripts/"
+  if compgen -G "$SRC_DIR/scripts/*.js" > /dev/null; then
+    cp "$SRC_DIR/scripts/"*.js "$dest/scripts/"
+  fi
   chmod +x "$dest/scripts/"*.py 2>/dev/null || true
   echo "[+] Installed ${SKILL_NAME} -> ${dest}"
 }

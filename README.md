@@ -4,7 +4,7 @@
 
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-SKILL.md-1F3864)](https://agentskills.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](https://www.python.org/)
 [![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf_%7C_Gemini_%7C_Copilot-548235)](#installation)
 
@@ -13,6 +13,13 @@
 Instead of drowning in waterfall spreadsheets or shallow "click every button" checklists, it maps the application, probes causal settings and cross-module ripples, verifies calculations outside the app, hunts async races and broken permissions in a live browser, and produces a validated Excel report.
 
 ---
+
+## What's new in 2.1.0
+
+- **Deterministic Browser Telemetry & WCAG Sensor (`scripts/browser_probes.js`):** Zero-dependency, secret-redacting, SSE-safe probe capturing `console.error`, `pageerror`, `unhandledrejection`, `fetch`/XHR `>=400`, GraphQL HTTP 200 `errors`, vanishing 1–2s toasts, overflow, obscured/clipped buttons, `<24x24px` tap targets, and unlabeled controls.
+- **Developer-Ready `DEFECTS.md` & Cross-Run Diff (`scripts/qa_diff.py`):** `build_report.py` writes copy-pasteable GitHub/Jira/Linear tickets in `DEFECTS.md` (with linked test-case oracles) alongside `QA_Report_*.xlsx`, and `qa_diff.py` compares two runs for regressions and coverage deltas.
+- **Full Lifecycle CLI & Guided Round-Trip:** `qa_record.py` adds `set-meta`, `update-fixture`, `update-defect`, `update-question`, `import-guided`, and batch `--stdin`/`--file` across `restore-config` and `update-case`.
+- **Offline Adversarial QA Gym (`evals/gym/`):** Self-contained Python stdlib mini-SaaS target (`evals/gym/server.py`) with 8 planted bugs, 2 false-positive traps, and `evals/score_gym_run.py` automated grading.
 
 ## What's new in 2.0.0
 
@@ -92,19 +99,27 @@ python "<skill-dir>/scripts/qa_record.py" <workspace> add-defect --from-case TC-
 # 3. Validate (errors block final report; includes .html/.har secret scan)
 python "<skill-dir>/scripts/validate_workspace.py" <workspace>
 
-# 4. Build styled 8-sheet Excel report (or --guided-sheet for no-browser runs)
+# 4. Build styled 8-sheet Excel report + DEFECTS.md (or --guided-sheet for no-browser runs)
 python "<skill-dir>/scripts/build_report.py" <workspace>
+
+# 5. Optional: import filled guided sheet or diff two runs
+python "<skill-dir>/scripts/qa_record.py" <workspace> import-guided --file Guided_Execution.xlsx
+python "<skill-dir>/scripts/qa_diff.py" <baseline_ws> <current_ws>
 ```
 
 Workbook sheets: **Summary**, **Test Cases**, **Defects**, **Coverage** (executed vs. linked coverage + traceability + role/category breakdowns), **Field Atlas**, **Relationships**, **Test Data & Config**, **Open Questions**.
 
 ---
 
-## Demo & Development
+## Demo, Adversarial Gym & Development
 
 ```bash
 # Generate synthetic demo workspace and report
 python examples/make_demo.py
+
+# Launch offline Adversarial QA Gym (8 planted bugs + 2 false-positive traps)
+python evals/gym/server.py --port 8765
+python evals/score_gym_run.py <workspace>
 
 # Run package, validation, and workbook checks
 python tests/check_skill.py
@@ -124,16 +139,23 @@ blackbox-ui-qa/
 │   ├── 05-tool-compat.md
 │   └── 06-domain-packs.md
 ├── scripts/
+│   ├── browser_probes.js
 │   ├── qa_common.py
 │   ├── qa_record.py
 │   ├── init_workspace.py
 │   ├── validate_workspace.py
-│   └── build_report.py
+│   ├── build_report.py
+│   └── qa_diff.py
 ├── examples/
 │   ├── make_demo.py
 │   ├── demo_report.xlsx
 │   └── README.md
-├── evals/evals.json
+├── evals/
+│   ├── evals.json
+│   ├── score_gym_run.py
+│   └── gym/
+│       ├── server.py
+│       └── ground_truth.json
 ├── tests/
 │   ├── check_skill.py
 │   └── smoke_test.py

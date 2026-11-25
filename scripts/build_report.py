@@ -514,7 +514,6 @@ def build_summary(wb: Workbook, loaded: dict, stats: dict, issues: list, *, inco
             fill=PatternFill("solid", fgColor="C6EFCE" if ok else "FFC7CE"),
             alignment=Alignment(horizontal="center", vertical="center"),
         )
-        _ = status_cell
         ws.row_dimensions[row].height = estimate_height([label, detail], [widths[0], sum(widths[1:5])])
         row += 1
 
@@ -1185,6 +1184,109 @@ def build_guided_workbook(loaded: dict, output: Path) -> None:
     wb.save(output)
 
 
+def build_defects_markdown(loaded: dict, path: Path, *, incomplete: bool) -> None:
+    """Write developer-ready, severity-sorted DEFECTS.md tickets alongside the Excel report."""
+    meta = loaded.get("meta") or {}
+    cases_by_id = {
+        as_text(c.get("id")): c
+        for c in loaded.get("test_cases") or []
+        if isinstance(c, dict) and as_text(c.get("id"))
+    }
+    defects = sorted(
+        loaded.get("defects") or [],
+        key=lambda d: (SEVERITY_RANK.get(as_text(d.get("severity")), 9), as_text(d.get("id"))),
+    )
+
+    lines = [
+        f"# Defects — {as_text(meta.get('app')) or 'Application'}",
+        "",
+    ]
+    if incomplete:
+        lines.extend(["> [!WARNING]", "> DRAFT — validation errors remain. Resolve before external handoff.", ""])
+
+    lines.extend(
+        [
+            f"- **Environment:** {as_text(meta.get('environment')) or 'unknown'} ({as_text(meta.get('url')) or 'no URL'})",
+            f"- **Scope / Depth:** {as_text(meta.get('scope')) or 'N/A'} | {as_text(meta.get('depth')) or 'Deep'}",
+            f"- **Total Defects:** {len(defects)}",
+            "",
+        ]
+    )
+
+    if not defects:
+        lines.append("No confirmed defects recorded.")
+    else:
+        for defect in defects:
+            did = as_text(defect.get("id"))
+            title = as_text(defect.get("title"))
+            severity = as_text(defect.get("severity"))
+            dtype = as_text(defect.get("type"))
+            status = as_text(defect.get("status")) or "Open"
+            module = as_text(defect.get("module"))
+            area = as_text(defect.get("path")) or module
+            env = as_text(defect.get("environment")) or as_text(meta.get("environment"))
+            tc_ids = [as_text(x) for x in as_list(defect.get("test_case_ids")) if as_text(x)]
+            oracles = []
+            for tid in tc_ids:
+                tc = cases_by_id.get(tid)
+                if tc and tc.get("oracle"):
+                    oracles.append(f"{tid}: {oracle_text(tc.get('oracle'))}")
+
+            lines.extend(
+                [
+                    "---",
+                    "",
+                    f"## [{did}] {title}",
+                    "",
+                    f"- **Severity:** `{severity}` | **Type:** `{dtype}` | **Status:** `{status}`",
+                    f"- **Area:** `{area}` (Module: `{module}`)",
+                    f"- **Test Cases:** {', '.join(tc_ids) if tc_ids else 'None'}",
+                ]
+            )
+            if env:
+                lines.append(f"- **Environment:** {env}")
+            if oracles:
+                lines.append(f"- **Oracle:** {' ; '.join(oracles)}")
+            if as_text(defect.get("preconditions")):
+                lines.append(f"- **Preconditions:** {as_text(defect.get('preconditions'))}")
+
+            lines.extend(["", "### Reproduction Steps", ""])
+            steps = as_list(defect.get("steps"))
+            if steps:
+                for idx, step in enumerate(steps, start=1):
+                    lines.append(f"{idx}. {as_text(step)}")
+            else:
+                lines.append("1. (No steps recorded)")
+
+            lines.extend(
+                [
+                    "",
+                    f"**Expected:** {as_text(defect.get('expected'))}",
+                    "",
+                    f"**Actual:** {as_text(defect.get('actual'))}",
+                    "",
+                ]
+            )
+            if as_text(defect.get("impact")):
+                lines.append(f"**Impact:** {as_text(defect.get('impact'))}\n")
+            if as_text(defect.get("likely_cause")):
+                lines.append(f"**Likely Cause:** {as_text(defect.get('likely_cause'))}\n")
+            if as_text(defect.get("workaround")):
+                lines.append(f"**Workaround:** {as_text(defect.get('workaround'))}\n")
+            lines.append(f"**Suggested Fix:** {as_text(defect.get('suggestion'))}\n")
+
+            ev_items = as_list(defect.get("evidence"))
+            if ev_items:
+                lines.append("**Evidence:**")
+                for ev in ev_items:
+                    lines.append(f"- `{as_text(ev)}`")
+                lines.append("")
+
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1208,6 +1310,7 @@ def main() -> int:
     parser.add_argument("--validate-only", action="store_true", help="Validate and print counts, do not build")
     parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     parser.add_argument("--no-secret-scan", action="store_true", help="Skip the credential scan")
+    parser.add_argument("--no-defects-md", action="store_true", help="Skip generating DEFECTS.md beside the workbook")
     args = parser.parse_args()
 
     workspace = Path(args.workspace).expanduser().resolve()
@@ -1304,6 +1407,10 @@ def main() -> int:
         return 1
 
     print(f"Report written: {output}")
+    if not args.no_defects_md:
+        defects_md = output.parent / "DEFECTS.md"
+        build_defects_markdown(loaded, defects_md, incomplete=bool(errors))
+        print(f"Defects written: {defects_md}")
     print(
         f"Cases: {stats['cases_total']} | "
         f"Pass: {stats['status_counts'].get('Pass', 0)} | "

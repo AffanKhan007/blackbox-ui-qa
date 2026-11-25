@@ -64,6 +64,10 @@ function Install-One {
     Copy-Item -Path (Join-Path $SrcDir "SKILL.md") -Destination (Join-Path $dest "SKILL.md") -Force
     Copy-Item -Path (Join-Path $SrcDir "references\*.md") -Destination $refDest -Force
     Copy-Item -Path (Join-Path $SrcDir "scripts\*.py") -Destination $scriptDest -Force
+    $jsFiles = Get-ChildItem -Path (Join-Path $SrcDir "scripts\*.js") -ErrorAction SilentlyContinue
+    if ($jsFiles) {
+        Copy-Item -Path $jsFiles.FullName -Destination $scriptDest -Force
+    }
 
     Write-Host "[+] Installed $SkillName -> $dest"
 }

@@ -24,11 +24,11 @@ Anything that changes visible controls, rules, or active context is a state:
 
 ## 2. Passive Surface Health Sweep (Every Screen)
 
-Run this check automatically on every state transition (via browser listener / JS probe in `05-tool-compat.md`):
-1. **Runtime errors:** `console.error` and uncaught `pageerror` exceptions.
+Run this check automatically on every state transition (via `scripts/browser_probes.js` injected with `addInitScript` / `evaluate`, draining `window.__QA_DRAIN__()` and calling `window.__QA_AUDIT__()`):
+1. **Runtime errors:** `console.error`, uncaught `pageerror`, and `unhandledrejection`.
 2. **Failed requests:** HTTP `>= 400` responses, plus HTTP `200` GraphQL/RPC payloads containing top-level `errors`.
-3. **Broken assets:** Images with `img.complete && img.naturalWidth === 0` or failed stylesheets/scripts.
-4. **Layout geometry:** Horizontal overflow (`document.documentElement.scrollWidth > window.innerWidth`) at desktop (`1440x900`) and narrow (`390x844`), clipped text, or overlapping interactive elements.
+3. **Ephemeral feedback:** Transient 1–2s toast/alert DOM nodes captured by `MutationObserver`.
+4. **Broken assets & layout geometry:** Broken images (`naturalWidth === 0`), horizontal overflow (`scrollWidth > innerWidth`) at desktop (`1440x900`) and narrow (`390x844`), clipped/obscured interactive elements, `< 24x24px` targets, unlabeled controls, and duplicate IDs.
 
 Log unexpected findings immediately as `Observation` or `Fail` cases without waiting for a later phase.
 

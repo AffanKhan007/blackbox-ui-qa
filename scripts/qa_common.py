@@ -428,6 +428,15 @@ def _check_evidence_paths(workspace: Path, value: Any, kind: str, ref: str, issu
                     ref,
                 )
             )
+        elif candidate.is_file() and candidate.stat().st_size == 0:
+            issues.append(
+                _issue(
+                    "error",
+                    "empty_evidence_file",
+                    f"{kind} {ref} references empty (0-byte) evidence file: {path_text}",
+                    ref,
+                )
+            )
 
 
 def _unique_ids(records: list, kind: str, issues: list) -> set[str]:
@@ -944,6 +953,11 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
                 issues.append(
                     _issue("error", "bad_ref", f"Test case {ref} references missing relationship '{relationship_id}'.", ref)
                 )
+        for cfg_id in as_list(case.get("config_matrix_ids")):
+            if as_text(cfg_id) not in config_matrix_ids:
+                issues.append(
+                    _issue("error", "bad_ref", f"Test case {ref} references missing configuration matrix entry '{cfg_id}'.", ref)
+                )
 
     # Defects
     for defect in defects:
@@ -1168,6 +1182,22 @@ def validate_workspace(loaded: dict, include_secret_scan: bool = True) -> list:
         issues.append(_issue("warning", "no_cases", "No test cases recorded yet."))
     if not controls and strict_atlas:
         issues.append(_issue("warning", "no_controls", "No controls recorded yet."))
+
+    app_map_path = ws / "01-app-map.md"
+    if depth in ("Deep", "Exhaustive") and app_map_path.is_file():
+        try:
+            app_map_text = app_map_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            app_map_text = ""
+        if "| S-001 |  |  |  | todo |  |  |" in app_map_text and "| visited |" not in app_map_text.lower():
+            issues.append(
+                _issue(
+                    "warning",
+                    "unmapped_app_map",
+                    "01-app-map.md still contains only the untouched S-001 placeholder row.",
+                    "01-app-map.md",
+                )
+            )
 
     if include_secret_scan:
         issues.extend(scan_secrets(ws))

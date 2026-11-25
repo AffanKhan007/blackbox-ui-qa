@@ -21,11 +21,17 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
         run: python -m pip install --upgrade pip -r requirements.txt
 
-      - name: Compile scripts and tests
-        run: python -m py_compile scripts/qa_common.py scripts/qa_record.py scripts/init_workspace.py scripts/validate_workspace.py scripts/build_report.py tests/check_skill.py tests/smoke_test.py examples/make_demo.py
+      - name: Compile scripts and syntax-check JS probes
+        run: |
+          python -m py_compile scripts/qa_common.py scripts/qa_record.py scripts/init_workspace.py scripts/validate_workspace.py scripts/build_report.py scripts/qa_diff.py evals/gym/server.py evals/score_gym_run.py tests/check_skill.py tests/smoke_test.py examples/make_demo.py
+          node --check scripts/browser_probes.js
 
       - name: Check skill package
         run: python tests/check_skill.py
