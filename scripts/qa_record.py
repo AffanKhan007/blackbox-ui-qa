@@ -197,6 +197,27 @@ def cmd_add_controls(workspace: Path, args: argparse.Namespace) -> list[str]:
     return added_ids
 
 
+def _prepare_relationships(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("source", "target", "type", "description"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Relationship is missing required '{req}'.")
+        _validate_enum(as_text(item.get("type")), REL_TYPES, "relationship type")
+        _validate_enum(as_text(item.get("confidence")), CONFIDENCES, "confidence")
+        rid = as_text(item.get("id")) or _next_id(out, "R")
+        if rid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate relationship id '{rid}'.")
+        item["id"] = rid
+        existing_ids.add(rid)
+        out.append(item)
+        added_ids.append(rid)
+    return out, added_ids
+
+
 def cmd_add_relationships(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "03-relationships.json"
     doc = _load_doc(path, {"relationships": []})
@@ -216,21 +237,7 @@ def cmd_add_relationships(workspace: Path, args: argparse.Namespace) -> list[str
             }
         ]
 
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["relationships"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("source", "target", "type", "description"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Relationship is missing required '{req}'.")
-        _validate_enum(as_text(item.get("type")), REL_TYPES, "relationship type")
-        _validate_enum(as_text(item.get("confidence")), CONFIDENCES, "confidence")
-        rid = as_text(item.get("id")) or _next_id(doc["relationships"], "R")
-        if rid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate relationship id '{rid}'.")
-        item["id"] = rid
-        existing_ids.add(rid)
-        doc["relationships"].append(item)
-        added_ids.append(rid)
+    doc["relationships"], added_ids = _prepare_relationships(doc["relationships"], items)
     write_json_atomic(path, doc)
     return added_ids
 
@@ -251,6 +258,27 @@ def _validate_case_fields(item: dict) -> None:
     triage = item.get("triage")
     if isinstance(triage, dict) and triage.get("disposition"):
         _validate_enum(as_text(triage.get("disposition")), TRIAGE_DISPOSITIONS, "triage disposition")
+
+
+def _prepare_cases(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str], list[dict]]:
+    added_ids: list[str] = []
+    added_cases: list[dict] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        _validate_case_fields(item)
+        tcid = as_text(item.get("id")) or _next_id(out, "TC")
+        if tcid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate test case id '{tcid}'.")
+        item["id"] = tcid
+        if as_text(item.get("status")) in ("Pass", "Fail") and not as_text(item.get("executed_at")):
+            item["executed_at"] = now_iso()
+        existing_ids.add(tcid)
+        out.append(item)
+        added_cases.append(item)
+        added_ids.append(tcid)
+    return out, added_ids, added_cases
 
 
 def cmd_add_cases(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -308,19 +336,9 @@ def cmd_add_cases(workspace: Path, args: argparse.Namespace) -> list[str]:
             item["triage"] = triage
         items = [item]
 
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["test_cases"] if isinstance(r, dict)}
-    for item in items:
-        _validate_case_fields(item)
-        tcid = as_text(item.get("id")) or _next_id(doc["test_cases"], "TC")
-        if tcid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate test case id '{tcid}'.")
-        item["id"] = tcid
-        existing_ids.add(tcid)
-        doc["test_cases"].append(item)
-        added_ids.append(tcid)
+    doc["test_cases"], added_ids, added_cases = _prepare_cases(doc["test_cases"], items)
     write_json_atomic(path, doc)
-    for item in items:
+    for item in added_cases:
         _sync_case_links(workspace, item)
     return added_ids
 
@@ -411,10 +429,49 @@ def cmd_update_case(workspace: Path, args: argparse.Namespace) -> list[str]:
     return [as_text(t.get("id")) for t in updated_targets]
 
 
+def _prepare_defects(
+    existing: list[dict],
+    items: list[dict],
+    cases_by_id: dict[str, dict] | None = None,
+) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        raw_dict = dict(raw)
+        from_case = as_text(raw_dict.get("from_case"))
+        if from_case:
+            src = (cases_by_id or {}).get(from_case)
+            if src is None:
+                raise SystemExit(f"ERROR: Source test case '{from_case}' not found for defect.")
+            item = _seed_defect_from_case(raw_dict, src)
+        else:
+            item = raw_dict
+        for req in ("title", "severity", "type", "module", "expected", "actual", "suggestion"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Defect is missing required '{req}'.")
+        if not as_list(item.get("steps")) or not as_list(item.get("evidence")) or not as_list(item.get("test_case_ids")):
+            raise SystemExit("ERROR: Defect requires non-empty 'steps', 'evidence', and 'test_case_ids'.")
+        _validate_enum(as_text(item.get("severity")), SEVERITIES, "severity")
+        _validate_enum(as_text(item.get("type")), DEFECT_TYPES, "defect type")
+        _validate_enum(as_text(item.get("status") or "Open"), DEFECT_STATUSES, "defect status")
+        did = as_text(item.get("id")) or _next_id(out, "DEF")
+        if did in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate defect id '{did}'.")
+        item["id"] = did
+        item.setdefault("status", "Open")
+        item.setdefault("created_at", now_iso())
+        existing_ids.add(did)
+        out.append(item)
+        added_ids.append(did)
+    return out, added_ids
+
+
 def cmd_add_defects(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "06-defects.json"
     doc = _load_doc(path, {"defects": []})
     items = _read_batch_payload(args)
+    cases_by_id: dict[str, dict] | None = None
     if items is None:
         if args.from_case:
             cases_doc = _load_doc(workspace / "05-test-cases.json", {"test_cases": []})
@@ -473,33 +530,36 @@ def cmd_add_defects(workspace: Path, args: argparse.Namespace) -> list[str]:
                     "created_at": now_iso(),
                 }
             ]
+    elif any(isinstance(raw, dict) and raw.get("from_case") for raw in items):
+        cases_doc = _load_doc(workspace / "05-test-cases.json", {"test_cases": []})
+        cases_by_id = {
+            as_text(c.get("id")): c for c in cases_doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id"))
+        }
 
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["defects"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("title", "severity", "type", "module", "expected", "actual", "suggestion"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Defect is missing required '{req}'.")
-        if not as_list(item.get("steps")):
-            raise SystemExit("ERROR: Defect is missing required 'steps'.")
-        if not as_list(item.get("evidence")):
-            raise SystemExit("ERROR: Defect is missing required 'evidence'.")
-        if not as_list(item.get("test_case_ids")):
-            raise SystemExit("ERROR: Defect is missing required 'test_case_ids'.")
-        _validate_enum(as_text(item.get("severity")), SEVERITIES, "severity")
-        _validate_enum(as_text(item.get("type")), DEFECT_TYPES, "defect type")
-        _validate_enum(as_text(item.get("status") or "Open"), DEFECT_STATUSES, "defect status")
-        did = as_text(item.get("id")) or _next_id(doc["defects"], "DEF")
-        if did in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate defect id '{did}'.")
-        item["id"] = did
-        item.setdefault("status", "Open")
-        item.setdefault("created_at", now_iso())
-        existing_ids.add(did)
-        doc["defects"].append(item)
-        added_ids.append(did)
+    doc["defects"], added_ids = _prepare_defects(doc["defects"], items, cases_by_id=cases_by_id)
     write_json_atomic(path, doc)
     return added_ids
+
+
+def _prepare_fixtures(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("name", "purpose"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Fixture is missing required '{req}'.")
+        if item.get("design"):
+            _validate_enum(as_text(item.get("design")), FIXTURE_DESIGNS, "fixture design")
+        fid = as_text(item.get("id")) or _next_id(out, "F")
+        if fid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate fixture id '{fid}'.")
+        item["id"] = fid
+        existing_ids.add(fid)
+        out.append(item)
+        added_ids.append(fid)
+    return out, added_ids
 
 
 def cmd_add_fixtures(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -519,23 +579,30 @@ def cmd_add_fixtures(workspace: Path, args: argparse.Namespace) -> list[str]:
                 "notes": args.notes,
             }
         ]
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["fixtures"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("name", "purpose"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Fixture is missing required '{req}'.")
-        if item.get("design"):
-            _validate_enum(as_text(item.get("design")), FIXTURE_DESIGNS, "fixture design")
-        fid = as_text(item.get("id")) or _next_id(doc["fixtures"], "F")
-        if fid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate fixture id '{fid}'.")
-        item["id"] = fid
-        existing_ids.add(fid)
-        doc["fixtures"].append(item)
-        added_ids.append(fid)
+    doc["fixtures"], added_ids = _prepare_fixtures(doc["fixtures"], items)
     write_json_atomic(path, doc)
     return added_ids
+
+
+def _prepare_config_changes(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("path", "original", "changed_to"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Config change is missing required '{req}'.")
+        cid = as_text(item.get("id")) or _next_id(out, "C")
+        if cid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate config change id '{cid}'.")
+        item["id"] = cid
+        item.setdefault("restored", False)
+        item.setdefault("changed_at", now_iso())
+        existing_ids.add(cid)
+        out.append(item)
+        added_ids.append(cid)
+    return out, added_ids
 
 
 def cmd_log_config(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -560,29 +627,35 @@ def cmd_log_config(workspace: Path, args: argparse.Namespace) -> list[str]:
                 "notes": args.notes,
             }
         ]
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["config_changes"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("path", "original", "changed_to"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Config change is missing required '{req}'.")
-        cid = as_text(item.get("id")) or _next_id(doc["config_changes"], "C")
-        if cid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate config change id '{cid}'.")
-        item["id"] = cid
-        item.setdefault("restored", False)
-        item.setdefault("changed_at", now_iso())
-        existing_ids.add(cid)
-        doc["config_changes"].append(item)
-        added_ids.append(cid)
+    doc["config_changes"], added_ids = _prepare_config_changes(doc["config_changes"], items)
     write_json_atomic(path, doc)
     return added_ids
+
+
+def _prepare_config_restores(existing: list[dict], items: list[dict], *, default_id: str = "") -> list[str]:
+    by_id = {as_text(c.get("id")): c for c in existing if isinstance(c, dict) and as_text(c.get("id"))}
+    restored_ids: list[str] = []
+    for raw in items:
+        cid = as_text(raw.get("id")) or default_id
+        if not cid:
+            raise SystemExit("ERROR: restore-config entry requires 'id'.")
+        target = by_id.get(cid)
+        if target is None:
+            raise SystemExit(f"ERROR: Config change '{cid}' not found.")
+        target["restored"] = True
+        target["restored_at"] = as_text(raw.get("restored_at")) or now_iso()
+        target["restored_value"] = as_text(raw.get("restored_value")) or target.get("original", "")
+        if raw.get("evidence"):
+            target["evidence"] = raw["evidence"]
+        if raw.get("notes"):
+            target["notes"] = raw["notes"]
+        restored_ids.append(cid)
+    return restored_ids
 
 
 def cmd_restore_config(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "07-fixtures-and-config-ledger.json"
     doc = _load_doc(path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
-    by_id = {as_text(c.get("id")): c for c in doc["config_changes"] if isinstance(c, dict) and as_text(c.get("id"))}
 
     items = _read_batch_payload(args)
     if items is None:
@@ -598,25 +671,35 @@ def cmd_restore_config(workspace: Path, args: argparse.Namespace) -> list[str]:
             }
         ]
 
-    restored_ids = []
-    for item in items:
-        cid = as_text(item.get("id")) or as_text(args.id)
-        if not cid:
-            raise SystemExit("ERROR: restore-config entry requires 'id'.")
-        target = by_id.get(cid)
-        if target is None:
-            raise SystemExit(f"ERROR: Config change '{cid}' not found.")
-        target["restored"] = True
-        target["restored_at"] = as_text(item.get("restored_at")) or now_iso()
-        target["restored_value"] = as_text(item.get("restored_value")) or target.get("original", "")
-        if item.get("evidence"):
-            target["evidence"] = item["evidence"]
-        if item.get("notes"):
-            target["notes"] = item["notes"]
-        restored_ids.append(cid)
-
+    restored_ids = _prepare_config_restores(doc["config_changes"], items, default_id=as_text(args.id))
     write_json_atomic(path, doc)
     return restored_ids
+
+
+def _prepare_config_matrix(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("area", "setting", "branch", "profile_value"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Configuration matrix entry is missing required '{req}'.")
+        opts = [as_text(o) for o in as_list(item.get("options")) if as_text(o)]
+        if not opts:
+            raise SystemExit("ERROR: Configuration matrix entry must provide non-empty 'options'.")
+        if as_text(item.get("profile_value")) not in opts:
+            raise SystemExit(
+                f"ERROR: profile_value '{item.get('profile_value')}' is not in options {opts}."
+            )
+        mid = as_text(item.get("id")) or _next_id(out, "CFG")
+        if mid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate configuration matrix id '{mid}'.")
+        item["id"] = mid
+        existing_ids.add(mid)
+        out.append(item)
+        added_ids.append(mid)
+    return out, added_ids
 
 
 def cmd_add_config_matrix(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -636,28 +719,31 @@ def cmd_add_config_matrix(workspace: Path, args: argparse.Namespace) -> list[str
                 "not_tested_reason": args.not_tested_reason,
             }
         ]
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["configuration_matrix"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("area", "setting", "branch", "profile_value"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Configuration matrix entry is missing required '{req}'.")
-        opts = [as_text(o) for o in as_list(item.get("options")) if as_text(o)]
-        if not opts:
-            raise SystemExit("ERROR: Configuration matrix entry must provide non-empty 'options'.")
-        if as_text(item.get("profile_value")) not in opts:
-            raise SystemExit(
-                f"ERROR: profile_value '{item.get('profile_value')}' is not in options {opts}."
-            )
-        mid = as_text(item.get("id")) or _next_id(doc["configuration_matrix"], "CFG")
-        if mid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate configuration matrix id '{mid}'.")
-        item["id"] = mid
-        existing_ids.add(mid)
-        doc["configuration_matrix"].append(item)
-        added_ids.append(mid)
+    doc["configuration_matrix"], added_ids = _prepare_config_matrix(doc["configuration_matrix"], items)
     write_json_atomic(path, doc)
     return added_ids
+
+
+def _prepare_questions(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids: list[str] = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("type", "description"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Question is missing required '{req}'.")
+        _validate_enum(as_text(item.get("type")), QUESTION_TYPES, "question type")
+        _validate_enum(as_text(item.get("status") or "Open"), QUESTION_STATUSES, "question status")
+        qid = as_text(item.get("id")) or _next_id(out, "Q")
+        if qid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate question id '{qid}'.")
+        item["id"] = qid
+        item.setdefault("status", "Open")
+        existing_ids.add(qid)
+        out.append(item)
+        added_ids.append(qid)
+    return out, added_ids
 
 
 def cmd_add_questions(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -676,22 +762,7 @@ def cmd_add_questions(workspace: Path, args: argparse.Namespace) -> list[str]:
                 "related": args.related or [],
             }
         ]
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["items"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("type", "description"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Question is missing required '{req}'.")
-        _validate_enum(as_text(item.get("type")), QUESTION_TYPES, "question type")
-        _validate_enum(as_text(item.get("status") or "Open"), QUESTION_STATUSES, "question status")
-        qid = as_text(item.get("id")) or _next_id(doc["items"], "Q")
-        if qid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate question id '{qid}'.")
-        item["id"] = qid
-        item.setdefault("status", "Open")
-        existing_ids.add(qid)
-        doc["items"].append(item)
-        added_ids.append(qid)
+    doc["items"], added_ids = _prepare_questions(doc["items"], items)
     write_json_atomic(path, doc)
     return added_ids
 
@@ -1060,61 +1131,26 @@ def cmd_ingest(workspace: Path, args: argparse.Namespace) -> list[str]:
         summary_ids.extend(cids)
 
     if bundle.get("relationships"):
-        existing_rids = {as_text(r.get("id")) for r in rel_doc["relationships"] if isinstance(r, dict)}
-        for raw in as_list(bundle["relationships"]):
-            item = dict(raw)
-            for req in ("source", "target", "type", "description"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Relationship is missing required '{req}'.")
-            _validate_enum(as_text(item.get("type")), REL_TYPES, "relationship type")
-            _validate_enum(as_text(item.get("confidence")), CONFIDENCES, "confidence")
-            rid = as_text(item.get("id")) or _next_id(rel_doc["relationships"], "R")
-            if rid in existing_rids:
-                raise SystemExit(f"ERROR: Duplicate relationship id '{rid}'.")
-            item["id"] = rid
-            existing_rids.add(rid)
-            rel_doc["relationships"].append(item)
-            summary_ids.append(rid)
-            dirty_rel = True
+        rel_doc["relationships"], rids = _prepare_relationships(
+            rel_doc["relationships"], as_list(bundle["relationships"])
+        )
+        dirty_rel = True
+        summary_ids.extend(rids)
 
     if bundle.get("configuration_matrix"):
-        existing_mids = {as_text(r.get("id")) for r in ledger_doc["configuration_matrix"] if isinstance(r, dict)}
-        for raw in as_list(bundle["configuration_matrix"]):
-            item = dict(raw)
-            for req in ("area", "setting", "branch", "profile_value"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Configuration matrix entry is missing required '{req}'.")
-            opts = [as_text(o) for o in as_list(item.get("options")) if as_text(o)]
-            if not opts:
-                raise SystemExit("ERROR: Configuration matrix entry must provide non-empty 'options'.")
-            if as_text(item.get("profile_value")) not in opts:
-                raise SystemExit(f"ERROR: profile_value '{item.get('profile_value')}' is not in options {opts}.")
-            mid = as_text(item.get("id")) or _next_id(ledger_doc["configuration_matrix"], "CFG")
-            if mid in existing_mids:
-                raise SystemExit(f"ERROR: Duplicate configuration matrix id '{mid}'.")
-            item["id"] = mid
-            existing_mids.add(mid)
-            ledger_doc["configuration_matrix"].append(item)
-            summary_ids.append(mid)
-            dirty_ledger = True
+        ledger_doc["configuration_matrix"], mids = _prepare_config_matrix(
+            ledger_doc["configuration_matrix"], as_list(bundle["configuration_matrix"])
+        )
+        dirty_ledger = True
+        summary_ids.extend(mids)
 
     added_cases: list[dict] = []
     if bundle.get("test_cases"):
-        existing_tcids = {as_text(r.get("id")) for r in cases_doc["test_cases"] if isinstance(r, dict)}
-        for raw in as_list(bundle["test_cases"]):
-            item = dict(raw)
-            _validate_case_fields(item)
-            tcid = as_text(item.get("id")) or _next_id(cases_doc["test_cases"], "TC")
-            if tcid in existing_tcids:
-                raise SystemExit(f"ERROR: Duplicate test case id '{tcid}'.")
-            item["id"] = tcid
-            if as_text(item.get("status")) in ("Pass", "Fail") and not as_text(item.get("executed_at")):
-                item["executed_at"] = now_iso()
-            existing_tcids.add(tcid)
-            cases_doc["test_cases"].append(item)
-            added_cases.append(item)
-            summary_ids.append(tcid)
-            dirty_cases = True
+        cases_doc["test_cases"], tcids, added_cases = _prepare_cases(
+            cases_doc["test_cases"], as_list(bundle["test_cases"])
+        )
+        dirty_cases = True
+        summary_ids.extend(tcids)
 
     cases_by_id = {as_text(c.get("id")): c for c in cases_doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id"))}
     defect_items = list(as_list(bundle.get("defects")))
@@ -1135,107 +1171,39 @@ def cmd_ingest(workspace: Path, args: argparse.Namespace) -> list[str]:
                 defect_items.append({"from_case": as_text(tc.get("id"))})
 
     if defect_items:
-        existing_dids = {as_text(r.get("id")) for r in defects_doc["defects"] if isinstance(r, dict)}
-        for raw in defect_items:
-            raw_dict = dict(raw)
-            from_case = as_text(raw_dict.get("from_case"))
-            if from_case:
-                src = cases_by_id.get(from_case)
-                if src is None:
-                    raise SystemExit(f"ERROR: Source test case '{from_case}' not found for defect.")
-                item = _seed_defect_from_case(raw_dict, src)
-            else:
-                item = raw_dict
-            for req in ("title", "severity", "type", "module", "expected", "actual", "suggestion"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Defect is missing required '{req}'.")
-            if not as_list(item.get("steps")) or not as_list(item.get("evidence")) or not as_list(item.get("test_case_ids")):
-                raise SystemExit("ERROR: Defect requires non-empty 'steps', 'evidence', and 'test_case_ids'.")
-            _validate_enum(as_text(item.get("severity")), SEVERITIES, "severity")
-            _validate_enum(as_text(item.get("type")), DEFECT_TYPES, "defect type")
-            _validate_enum(as_text(item.get("status") or "Open"), DEFECT_STATUSES, "defect status")
-            did = as_text(item.get("id")) or _next_id(defects_doc["defects"], "DEF")
-            if did in existing_dids:
-                raise SystemExit(f"ERROR: Duplicate defect id '{did}'.")
-            item["id"] = did
-            item.setdefault("status", "Open")
-            item.setdefault("created_at", now_iso())
-            existing_dids.add(did)
-            defects_doc["defects"].append(item)
-            summary_ids.append(did)
-            dirty_defects = True
+        defects_doc["defects"], dids = _prepare_defects(
+            defects_doc["defects"], defect_items, cases_by_id=cases_by_id
+        )
+        dirty_defects = True
+        summary_ids.extend(dids)
 
     if bundle.get("fixtures"):
-        existing_fids = {as_text(r.get("id")) for r in ledger_doc["fixtures"] if isinstance(r, dict)}
-        for raw in as_list(bundle["fixtures"]):
-            item = dict(raw)
-            for req in ("name", "purpose"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Fixture is missing required '{req}'.")
-            if item.get("design"):
-                _validate_enum(as_text(item.get("design")), FIXTURE_DESIGNS, "fixture design")
-            fid = as_text(item.get("id")) or _next_id(ledger_doc["fixtures"], "F")
-            if fid in existing_fids:
-                raise SystemExit(f"ERROR: Duplicate fixture id '{fid}'.")
-            item["id"] = fid
-            existing_fids.add(fid)
-            ledger_doc["fixtures"].append(item)
-            summary_ids.append(fid)
-            dirty_ledger = True
+        ledger_doc["fixtures"], fids = _prepare_fixtures(
+            ledger_doc["fixtures"], as_list(bundle["fixtures"])
+        )
+        dirty_ledger = True
+        summary_ids.extend(fids)
 
     if bundle.get("config_changes"):
-        existing_cids = {as_text(r.get("id")) for r in ledger_doc["config_changes"] if isinstance(r, dict)}
-        for raw in as_list(bundle["config_changes"]):
-            item = dict(raw)
-            for req in ("path", "original", "changed_to"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Config change is missing required '{req}'.")
-            cid = as_text(item.get("id")) or _next_id(ledger_doc["config_changes"], "C")
-            if cid in existing_cids:
-                raise SystemExit(f"ERROR: Duplicate config change id '{cid}'.")
-            item["id"] = cid
-            item.setdefault("restored", False)
-            item.setdefault("changed_at", now_iso())
-            existing_cids.add(cid)
-            ledger_doc["config_changes"].append(item)
-            summary_ids.append(cid)
-            dirty_ledger = True
+        ledger_doc["config_changes"], cids = _prepare_config_changes(
+            ledger_doc["config_changes"], as_list(bundle["config_changes"])
+        )
+        dirty_ledger = True
+        summary_ids.extend(cids)
 
     if bundle.get("config_restores"):
-        cfg_by_id = {as_text(c.get("id")): c for c in ledger_doc["config_changes"] if isinstance(c, dict) and as_text(c.get("id"))}
-        for raw in as_list(bundle["config_restores"]):
-            cid = as_text(raw.get("id"))
-            target = cfg_by_id.get(cid)
-            if target is None:
-                raise SystemExit(f"ERROR: Config change '{cid}' not found for restore.")
-            target["restored"] = True
-            target["restored_at"] = as_text(raw.get("restored_at")) or now_iso()
-            target["restored_value"] = as_text(raw.get("restored_value")) or target.get("original", "")
-            if raw.get("evidence"):
-                target["evidence"] = raw["evidence"]
-            if raw.get("notes"):
-                target["notes"] = raw["notes"]
-            summary_ids.append(cid)
-            dirty_ledger = True
+        restored_cids = _prepare_config_restores(
+            ledger_doc["config_changes"], as_list(bundle["config_restores"])
+        )
+        dirty_ledger = True
+        summary_ids.extend(restored_cids)
 
     if bundle.get("questions"):
-        existing_qids = {as_text(r.get("id")) for r in questions_doc["items"] if isinstance(r, dict)}
-        for raw in as_list(bundle["questions"]):
-            item = dict(raw)
-            for req in ("type", "description"):
-                if not as_text(item.get(req)):
-                    raise SystemExit(f"ERROR: Question is missing required '{req}'.")
-            _validate_enum(as_text(item.get("type")), QUESTION_TYPES, "question type")
-            _validate_enum(as_text(item.get("status") or "Open"), QUESTION_STATUSES, "question status")
-            qid = as_text(item.get("id")) or _next_id(questions_doc["items"], "Q")
-            if qid in existing_qids:
-                raise SystemExit(f"ERROR: Duplicate question id '{qid}'.")
-            item["id"] = qid
-            item.setdefault("status", "Open")
-            existing_qids.add(qid)
-            questions_doc["items"].append(item)
-            summary_ids.append(qid)
-            dirty_questions = True
+        questions_doc["items"], qids = _prepare_questions(
+            questions_doc["items"], as_list(bundle["questions"])
+        )
+        dirty_questions = True
+        summary_ids.extend(qids)
 
     for tc in added_cases:
         c_ch, r_ch, m_ch = _sync_links_in_memory(

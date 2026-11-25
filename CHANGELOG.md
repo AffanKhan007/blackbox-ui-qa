@@ -2,6 +2,13 @@
 
 All notable changes to `blackbox-ui-qa` are documented here.
 
+## [2.2.0] — 2026-11-25
+
+- **Hardened Secret Scanning & Redaction (`scripts/qa_common.py`, `scripts/browser_probes.js`):** Added detection and redaction for raw un-prefixed JWTs (`eyJ...`), Slack tokens (`xox[baprs]-...`), and Stripe live keys (`sk_live_` / `rk_live_`), plus active-focus obscuration (`focusedObscured`) inside `window.__QA_AUDIT__()`.
+- **Upgraded Playwright Probe Runner (`scripts/pw_probe.py`):** Added `--storage-state` reuse across all commands (enforcing Rule 5 by rejecting state paths inside the QA workspace), `save-auth` for login session capture outside the workspace, `exec` for declarative multi-step JSON browser workflows (`goto`, `fill`, `click`, `select`, `check`, `press`, `wait`, `wait_for`, `reload`, `screenshot`, `assert_text`, `assert_visible`, `assert_url`, `audit`), and automated `a11y-keyboard` traversal with WCAG 2.2 focus-indicator, sticky-overlay obscuration, focus-trap, and `Escape` dialog checks.
+- **Zero-Duplication Recorder Core (`scripts/qa_record.py`):** Extracted shared `_prepare_*` helpers across all individual CLI subcommands and multi-artifact `ingest`, eliminating duplicated validation and ensuring strict all-or-nothing behavior across both paths.
+- **Repo Hygiene & Docs:** Untracked and gitignored `assets/demo.webm` (kept `assets/record_demo.py` to regenerate locally on demand) and updated `examples/README.md` to document `REPORT.html` and `DEFECTS.md`.
+
 ## [2.1.0] — 2026-11-25
 
 - **Deterministic Browser Sensor & Playwright Accelerator (`scripts/browser_probes.js`, `scripts/pw_probe.py`):** Added zero-dependency, idempotent, secret-redacting, SSE-safe telemetry (`console.error`, `pageerror`, `unhandledrejection`, `fetch`/XHR `>=400`, GraphQL HTTP 200 `errors`, `MutationObserver` toast capture) and `window.__QA_AUDIT__()` (overflow, broken images, obscured/clipped controls, `<24x24px` tap targets, unlabeled controls, duplicate IDs), plus optional deterministic `pw_probe.py` (`sweep`, `race-search`, `double-submit`, `reload-check`, `authz-url`). Updated `install.sh` and `install.ps1` to copy `.js` scripts.

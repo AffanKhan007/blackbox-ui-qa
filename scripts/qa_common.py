@@ -460,6 +460,9 @@ SECRET_PATTERNS = [
     ("aws_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "error"),
     ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "error"),
     ("openai_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"), "error"),
+    ("jwt_token", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"), "error"),
+    ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "error"),
+    ("stripe_key", re.compile(r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b"), "error"),
     ("bearer_token", re.compile(r"(?i)\bBearer\s+([A-Za-z0-9\-._~+/]{20,}=*)"), "error"),
     (
         "url_credentials",
@@ -527,6 +530,21 @@ def redact_text(text: str) -> str:
     out = re.sub(
         r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{12,}=*",
         "Bearer [REDACTED]",
+        out,
+    )
+    out = re.sub(
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+        "[REDACTED JWT]",
+        out,
+    )
+    out = re.sub(
+        r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b",
+        "[REDACTED SLACK TOKEN]",
+        out,
+    )
+    out = re.sub(
+        r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b",
+        "[REDACTED STRIPE KEY]",
         out,
     )
     out = re.sub(

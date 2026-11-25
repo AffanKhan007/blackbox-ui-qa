@@ -4,7 +4,7 @@
 
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-SKILL.md-1F3864)](SKILL.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](CHANGELOG.md)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](requirements.txt)
 [![Live Sample Report](https://img.shields.io/badge/Live_Demo-Sample_Report-2F5597)](https://affankhan007.github.io/blackbox-ui-qa/)
 [![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf_%7C_Gemini_%7C_Copilot-548235)](#installation)
@@ -129,7 +129,7 @@ Every validated run outputs three synchronized artifacts (or an interactive Exce
 
 ![Interactive HTML Report Preview](assets/report-preview.png)
 
-Inspect tracked sample outputs in [`examples/`](examples/README.md): [`demo_report.xlsx`](examples/demo_report.xlsx), [`REPORT.html`](examples/REPORT.html), and [`DEFECTS.md`](examples/DEFECTS.md). To regenerate the demo walkthrough video (`assets/demo.webm`) or render `demo.gif` / `demo.mp4`, run [`assets/record_demo.py`](assets/record_demo.py).
+Inspect tracked sample outputs in [`examples/`](examples/README.md): [`demo_report.xlsx`](examples/demo_report.xlsx), [`REPORT.html`](examples/REPORT.html), and [`DEFECTS.md`](examples/DEFECTS.md). To render a local demo walkthrough video (`assets/demo.webm`, gitignored) or convert to `demo.gif` / `demo.mp4`, run [`assets/record_demo.py`](assets/record_demo.py).
 
 ---
 
@@ -142,7 +142,10 @@ All workspace scripts live under `scripts/` (`init_workspace.py`, `qa_record.py`
 python scripts/init_workspace.py --app "Acme HR" --url "https://staging.example.com" --module Payroll --depth deep
 
 # 2. Optional deterministic Playwright probes (injects browser_probes.js via addInitScript)
-python scripts/pw_probe.py <ws> sweep --login-url <url>/login --user admin --password "..." --url <url>/orders
+python scripts/pw_probe.py <ws> save-auth --login-url <url>/login --user admin --password "..." --out /tmp/qa_admin.json
+python scripts/pw_probe.py <ws> sweep --storage-state /tmp/qa_admin.json --url <url>/orders
+python scripts/pw_probe.py <ws> a11y-keyboard --storage-state /tmp/qa_admin.json --url <url>/orders --tabs 25
+python scripts/pw_probe.py <ws> exec --storage-state /tmp/qa_admin.json --file steps.json
 python scripts/pw_probe.py <ws> race-search --url <url>/orders --selector "#order-search" --query-a alpha --query-b beta
 python scripts/pw_probe.py <ws> double-submit --url <url>/orders --fill 'input[name="customer"]=QA_DBL' --submit-selector "#create-order-btn"
 python scripts/pw_probe.py <ws> reload-check --url <url>/orders/detail?id=1 --fill "#note-input=QA_NOTE" --submit-selector '#note-form button[type="submit"]' --watch-selector "#note-display"

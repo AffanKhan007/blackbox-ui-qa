@@ -11,6 +11,9 @@
   const SECRET_URL_PARAM_RE = /([?&](?:token|access_token|refresh_token|code|key|api_key|apikey|secret|password|pwd|jwt|session|auth)=)([^&#]+)/gi;
   const USERINFO_URL_RE = /([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+:[^/\s@]+)@/gi;
   const BEARER_RE = /\bBearer\s+[A-Za-z0-9\-._~+/]{12,}=*/gi;
+  const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
+  const SLACK_RE = /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g;
+  const STRIPE_RE = /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/g;
   const SENSITIVE_KEY_RE = /^(?:password|passwd|pwd|secret|token|access_token|refresh_token|api_key|apikey|client_secret|authorization|cookie|set-cookie|jwt|session)$/i;
 
   function redactText(value) {
@@ -19,6 +22,9 @@
     text = text.replace(USERINFO_URL_RE, '$1[REDACTED]@');
     text = text.replace(SECRET_URL_PARAM_RE, '$1[REDACTED]');
     text = text.replace(BEARER_RE, 'Bearer [REDACTED]');
+    text = text.replace(JWT_RE, '[REDACTED JWT]');
+    text = text.replace(SLACK_RE, '[REDACTED SLACK TOKEN]');
+    text = text.replace(STRIPE_RE, '[REDACTED STRIPE KEY]');
     if (text.length > MAX_TEXT) {
       text = text.slice(0, MAX_TEXT - 3) + '...';
     }
@@ -356,6 +362,22 @@
     }
     const duplicateIds = Object.keys(idCounts).filter((k) => idCounts[k] > 1).slice(0, 20);
 
+    let focusedObscured = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement && isVisible(active)) {
+      const aRect = active.getBoundingClientRect();
+      if (aRect.top >= 0 && aRect.bottom <= window.innerHeight && aRect.left >= 0 && aRect.right <= window.innerWidth) {
+        const hit = document.elementFromPoint(aRect.left + aRect.width / 2, aRect.top + aRect.height / 2);
+        if (hit && hit !== active && !active.contains(hit) && !hit.contains(active)) {
+          focusedObscured = {
+            tag: active.tagName.toLowerCase(),
+            label: (active.innerText || active.getAttribute('aria-label') || active.name || active.id || active.tagName).trim().slice(0, 60),
+            coveredBy: (hit.id || hit.className || hit.tagName).toString().slice(0, 60),
+          };
+        }
+      }
+    }
+
     return {
       url: redactText(location.href),
       viewport: { width: window.innerWidth, height: window.innerHeight, scrollWidth: docEl.scrollWidth },
@@ -366,6 +388,7 @@
       smallTargets: smallTargets.slice(0, 25),
       obscuredOrClipped: obscuredOrClipped.slice(0, 25),
       duplicateIds,
+      focusedObscured,
     };
   };
 

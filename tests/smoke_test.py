@@ -583,7 +583,7 @@ def main() -> int:
         assert res.returncode != 0
         assert any(e["code"] == "uncovered_control" for e in json.loads(res.stdout)["errors"])
 
-        # Negative 3: Secret inside .html snapshot blocks final report
+        # Negative 3: Secret inside .html snapshot blocks final report (bearer, raw JWT, Slack, Stripe)
         reset()
         (workspace / "evidence/snapshots/leak.html").write_text(
             "<div>Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9_REALTOKEN</div>\n",
@@ -593,6 +593,17 @@ def main() -> int:
         assert res.returncode != 0
         errs = json.loads(res.stdout)["errors"]
         assert any(e["code"] == "possible_secret" and "evidence/snapshots/leak.html" in e["ref"] for e in errs), errs
+
+        (workspace / "evidence/snapshots/leak.html").write_text(
+            "<script>const jwt='eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyXzEyMyJ9.signature_abcdef12345';</script>\n"
+            "<script>const slack='xoxb-1234567890-abcdef123456';</script>\n",
+            encoding="utf-8",
+        )
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        errs = json.loads(res.stdout)["errors"]
+        assert any("jwt_token" in e["message"] for e in errs), errs
+        assert any("slack_token" in e["message"] for e in errs), errs
 
         # Negative 4: Missing evidence file and path traversal are errors
         reset()
@@ -655,6 +666,26 @@ def main() -> int:
         assert res.returncode != 0
         assert any(e["code"] == "empty_evidence_file" for e in json.loads(res.stdout)["errors"])
 
+        # Negative 9: qa_record.py ingest fails atomically when any item in the bundle is invalid
+        reset()
+        before_rel = (workspace / "03-relationships.json").read_text(encoding="utf-8")
+        bad_bundle = {
+            "relationships": [
+                {"source": "Orders", "target": "Audit", "type": "notifies", "description": "Rollback test", "not_tested_reason": "temp"}
+            ],
+            "defects": [
+                {"title": "Broken", "severity": "High", "type": "Functional", "module": "Orders", "expected": "x", "actual": "y", "steps": ["s"], "evidence": ["e"], "test_case_ids": ["TC-0001"]}
+            ],
+        }
+        bad_ingest = subprocess.run(
+            [sys.executable, str(SCRIPTS / "qa_record.py"), str(workspace), "ingest", "--stdin"],
+            input=json.dumps(bad_bundle),
+            text=True,
+            capture_output=True,
+        )
+        assert bad_ingest.returncode != 0
+        assert (workspace / "03-relationships.json").read_text(encoding="utf-8") == before_rel
+
         # qa_diff.py baseline vs modified workspace
         reset()
         curr_ws = Path(temp) / "current-ws"
@@ -671,7 +702,7 @@ def main() -> int:
 
         # browser_probes.js sanity check (plus node --check if node is installed)
         probe_js = (ROOT / "scripts" / "browser_probes.js").read_text(encoding="utf-8")
-        for token in ("__QA_TELEMETRY__", "__QA_DRAIN__", "__QA_AUDIT__", "text/event-stream"):
+        for token in ("__QA_TELEMETRY__", "__QA_DRAIN__", "__QA_AUDIT__", "focusedObscured", "text/event-stream"):
             assert token in probe_js, f"Missing {token} in browser_probes.js"
         node_bin = shutil.which("node")
         if node_bin:
@@ -731,6 +762,77 @@ def main() -> int:
                 # Unauthorized origin must be blocked
                 bad_res = run(str(SCRIPTS / "pw_probe.py"), str(pw_ws), "sweep", "--url", "https://unauthorized.example.test")
                 assert bad_res.returncode != 0
+
+                # Save-auth must reject saving storage state inside workspace (Rule 5)
+                bad_state_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "save-auth",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--out",
+                    str(pw_ws / "auth_leak.json"),
+                )
+                assert bad_state_res.returncode != 0
+
+                # Save-auth outside workspace and reuse via --storage-state for exec & a11y-keyboard
+                admin_state = Path(temp) / "pw_admin_state.json"
+                sa_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "save-auth",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--out",
+                    str(admin_state),
+                )
+                assert sa_res.returncode == 0, sa_res.stderr
+                assert admin_state.is_file()
+
+                exec_plan = {
+                    "viewport": "1440x900",
+                    "storage_state": str(admin_state),
+                    "out_prefix": "exec_smoke",
+                    "steps": [
+                        {"action": "goto", "url": f"{base_url}/orders"},
+                        {"action": "assert_text", "selector": "#orders-tbody", "contains": "Acme Retail"},
+                        {"action": "screenshot", "name": "exec_orders"},
+                        {"action": "audit"},
+                    ],
+                }
+                ex_proc = subprocess.run(
+                    [sys.executable, str(SCRIPTS / "pw_probe.py"), str(pw_ws), "exec", "--stdin"],
+                    input=json.dumps(exec_plan),
+                    text=True,
+                    capture_output=True,
+                )
+                assert ex_proc.returncode == 0, ex_proc.stdout + ex_proc.stderr
+                ex_json = json.loads(ex_proc.stdout)
+                assert ex_json["ok"] is True and "focusedObscured" in ex_json["audit"], ex_json
+                assert (pw_ws / "evidence/screenshots/exec_orders.png").is_file()
+
+                ak_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "a11y-keyboard",
+                    "--storage-state",
+                    str(admin_state),
+                    "--url",
+                    f"{base_url}/orders",
+                    "--tabs",
+                    "6",
+                )
+                assert ak_res.returncode == 0, ak_res.stderr
+                ak_json = json.loads(ak_res.stdout)
+                assert ak_json["unique_focus_targets"] >= 1, ak_json
 
                 # Sweep mobile + desktop viewports with browser_probes.js addInitScript
                 sw_res = run(

@@ -8,9 +8,15 @@ A synthetic `blackbox-ui-qa` v2.0 run showing how `qa_record.py`, `validate_work
 python examples/make_demo.py
 ```
 
-Writes `examples/demo-workspace/` and `examples/demo_report.xlsx`. Re-running safely refreshes only the demo folder.
+Writes `examples/demo-workspace/` (gitignored), `examples/demo_report.xlsx`, `examples/REPORT.html`, and `examples/DEFECTS.md`. Re-running safely refreshes only the demo folder and outputs.
 
-## What is inside
+## Deliverables
+
+- **[`demo_report.xlsx`](demo_report.xlsx)** — 8-tab Excel QA workbook summarized below.
+- **[`REPORT.html`](REPORT.html)** — Zero-dependency interactive HTML report with live filters and inline screenshot previews.
+- **[`DEFECTS.md`](DEFECTS.md)** — Severity-sorted, copy-pasteable defect tickets seeded from failed test cases.
+
+## What is inside `demo_report.xlsx`
 
 | Sheet | Demo highlight |
 |---|---|

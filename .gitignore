@@ -19,6 +19,7 @@ launch-kit/
 storage_state.json
 auth.json
 cookies.json
+assets/demo.webm
 
 # OS/editor
 .DS_Store

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -82,9 +83,36 @@ def _redact_obj(obj: Any) -> Any:
     return obj
 
 
-def _open_context(browser, meta: dict, viewport: dict[str, int] | None = None):
+def _validate_storage_state(workspace: Path, raw_path: str, *, must_exist: bool = False) -> Path | None:
+    if not raw_path:
+        return None
+    ws_resolved = workspace.resolve()
+    state_path = Path(raw_path).expanduser().resolve()
+    try:
+        state_path.relative_to(ws_resolved)
+        inside_ws = True
+    except ValueError:
+        inside_ws = False
+    if inside_ws:
+        raise SystemExit(
+            f"ERROR: --storage-state path '{state_path}' must reside outside QA workspace '{ws_resolved}' (Rule 5)."
+        )
+    if must_exist and not state_path.is_file():
+        raise SystemExit(f"ERROR: --storage-state file not found: {state_path}")
+    return state_path
+
+
+def _open_context(
+    browser,
+    meta: dict,
+    viewport: dict[str, int] | None = None,
+    storage_state: Path | None = None,
+):
     vp = viewport or {"width": 1440, "height": 900}
-    context = browser.new_context(viewport=vp)
+    ctx_kwargs: dict[str, Any] = {"viewport": vp}
+    if storage_state is not None:
+        ctx_kwargs["storage_state"] = str(storage_state)
+    context = browser.new_context(**ctx_kwargs)
     if PROBE_JS_PATH.is_file():
         context.add_init_script(path=str(PROBE_JS_PATH))
     page = context.new_page()
@@ -123,15 +151,20 @@ def _save_evidence_json(workspace: Path, rel_path: str, payload: Any) -> str:
     return rel_path
 
 
+def _authorized_origins(meta: dict) -> list[str]:
+    return [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+
+
 def cmd_sweep(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
-    origins = [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
     for u in args.url:
         _check_origin(u, origins)
 
     browser = p.chromium.launch(headless=not args.headed)
     results = []
     try:
-        context, page = _open_context(browser, meta, _parse_viewport(args.viewport[0]))
+        context, page = _open_context(browser, meta, _parse_viewport(args.viewport[0]), storage_state=state_path)
         try:
             _login_if_needed(page, args, origins)
             for u in args.url:
@@ -162,12 +195,13 @@ def cmd_sweep(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
 
 
 def cmd_race_search(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
-    origins = [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
     _check_origin(args.url, origins)
 
     browser = p.chromium.launch(headless=not args.headed)
     try:
-        context, page = _open_context(browser, meta)
+        context, page = _open_context(browser, meta, storage_state=state_path)
         try:
             _login_if_needed(page, args, origins)
             page.goto(args.url, wait_until="domcontentloaded")
@@ -210,12 +244,13 @@ def cmd_race_search(workspace: Path, meta: dict, args: argparse.Namespace, p) ->
 
 def cmd_double_submit(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
     _require_staging(meta, "double-submit")
-    origins = [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
     _check_origin(args.url, origins)
 
     browser = p.chromium.launch(headless=not args.headed)
     try:
-        context, page = _open_context(browser, meta)
+        context, page = _open_context(browser, meta, storage_state=state_path)
         try:
             _login_if_needed(page, args, origins)
             page.goto(args.url, wait_until="domcontentloaded")
@@ -267,12 +302,13 @@ def cmd_double_submit(workspace: Path, meta: dict, args: argparse.Namespace, p) 
 
 def cmd_reload_check(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
     _require_staging(meta, "reload-check")
-    origins = [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
     _check_origin(args.url, origins)
 
     browser = p.chromium.launch(headless=not args.headed)
     try:
-        context, page = _open_context(browser, meta)
+        context, page = _open_context(browser, meta, storage_state=state_path)
         try:
             _login_if_needed(page, args, origins)
             page.goto(args.url, wait_until="domcontentloaded")
@@ -316,12 +352,13 @@ def cmd_reload_check(workspace: Path, meta: dict, args: argparse.Namespace, p) -
 
 
 def cmd_authz_url(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
-    origins = [as_text(o) for o in as_list((meta.get("run_contract") or {}).get("authorized_origins")) if as_text(o)]
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
     _check_origin(args.target_url, origins)
 
     browser = p.chromium.launch(headless=not args.headed)
     try:
-        context, page = _open_context(browser, meta)
+        context, page = _open_context(browser, meta, storage_state=state_path)
         try:
             _login_if_needed(page, args, origins)
             resp = page.goto(args.target_url, wait_until="domcontentloaded")
@@ -353,6 +390,304 @@ def cmd_authz_url(workspace: Path, meta: dict, args: argparse.Namespace, p) -> d
         browser.close()
 
 
+def cmd_save_auth(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
+    origins = _authorized_origins(meta)
+    out_path = _validate_storage_state(workspace, args.out, must_exist=False)
+    assert out_path is not None
+    login_url = args.login_url or args.url
+    if not login_url:
+        raise SystemExit("ERROR: save-auth requires --login-url (or --url).")
+    _check_origin(login_url, origins)
+
+    in_state = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
+    browser = p.chromium.launch(headless=not args.headed)
+    try:
+        context, page = _open_context(browser, meta, storage_state=in_state)
+        try:
+            page.goto(login_url, wait_until="domcontentloaded")
+            if args.user:
+                page.fill(args.user_sel, args.user)
+            if args.password:
+                page.fill(args.pass_sel, args.password)
+            for pair in args.fill or []:
+                sel, val = _parse_fill(pair)
+                page.fill(sel, val)
+            for sel in args.click or []:
+                page.click(sel)
+            if (args.user or args.password) and not args.click and args.submit_sel:
+                page.click(args.submit_sel)
+                page.wait_for_load_state("domcontentloaded")
+            if args.wait_ms > 0:
+                page.wait_for_timeout(args.wait_ms)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            context.storage_state(path=str(out_path))
+            return {
+                "ok": True,
+                "command": "save-auth",
+                "storage_state": str(out_path),
+                "final_url": redact_text(page.url),
+                "cookies_count": len(context.cookies()),
+            }
+        finally:
+            context.close()
+    finally:
+        browser.close()
+
+
+def _load_exec_payload(args: argparse.Namespace) -> dict:
+    if args.stdin:
+        raw = sys.stdin.read()
+    elif args.file:
+        raw = Path(args.file).expanduser().read_text(encoding="utf-8")
+    else:
+        raise SystemExit("ERROR: exec requires --stdin or --file with a JSON plan.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"ERROR: Invalid JSON for exec: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("steps"), list):
+        raise SystemExit("ERROR: exec JSON payload must be an object with a 'steps' array.")
+    return payload
+
+
+def cmd_exec(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
+    origins = _authorized_origins(meta)
+    payload = _load_exec_payload(args)
+    if payload.get("mutating") is True or any(isinstance(s, dict) and s.get("mutating") for s in payload["steps"]):
+        _require_staging(meta, "exec (mutating)")
+    raw_state = getattr(args, "storage_state", "") or as_text(payload.get("storage_state"))
+    state_path = _validate_storage_state(workspace, raw_state, must_exist=True)
+    vp = _parse_viewport(as_text(payload.get("viewport")) or "1440x900")
+    out_prefix = args.out_prefix or as_text(payload.get("out_prefix"))
+
+    for step in payload["steps"]:
+        if isinstance(step, dict) and step.get("action") == "goto" and step.get("url"):
+            _check_origin(as_text(step.get("url")), origins)
+
+    browser = p.chromium.launch(headless=not args.headed)
+    step_logs: list[dict[str, Any]] = []
+    ok = True
+    failed_reason = ""
+    try:
+        context, page = _open_context(browser, meta, viewport=vp, storage_state=state_path)
+        try:
+            _login_if_needed(page, args, origins)
+            for idx, step in enumerate(payload["steps"], 1):
+                if not isinstance(step, dict) or not as_text(step.get("action")):
+                    raise SystemExit(f"ERROR: exec step #{idx} must be an object with 'action'.")
+                act = as_text(step["action"]).lower()
+                rec: dict[str, Any] = {"step": idx, "action": act, "ok": True}
+                try:
+                    if act == "goto":
+                        resp = page.goto(as_text(step["url"]), wait_until=as_text(step.get("wait_until")) or "domcontentloaded")
+                        rec["url"] = redact_text(page.url)
+                        rec["status"] = resp.status if resp else None
+                    elif act == "fill":
+                        page.fill(as_text(step["selector"]), as_text(step.get("value")))
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "click":
+                        page.click(as_text(step["selector"]), no_wait_after=bool(step.get("no_wait_after")))
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "select":
+                        page.select_option(as_text(step["selector"]), as_text(step.get("value")))
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "check":
+                        page.check(as_text(step["selector"]))
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "uncheck":
+                        page.uncheck(as_text(step["selector"]))
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "press":
+                        target_sel = as_text(step.get("selector"))
+                        if target_sel:
+                            page.press(target_sel, as_text(step["key"]))
+                        else:
+                            page.keyboard.press(as_text(step["key"]))
+                        rec["key"] = as_text(step["key"])
+                    elif act == "wait":
+                        ms = int(step.get("ms", 300))
+                        page.wait_for_timeout(ms)
+                        rec["ms"] = ms
+                    elif act == "wait_for":
+                        timeout_ms = int(step.get("timeout_ms", 5000))
+                        page.wait_for_selector(as_text(step["selector"]), timeout=timeout_ms)
+                        rec["selector"] = as_text(step["selector"])
+                    elif act == "reload":
+                        resp = page.reload(wait_until="domcontentloaded")
+                        rec["status"] = resp.status if resp else None
+                    elif act == "screenshot":
+                        raw_name = as_text(step.get("name")) or f"step_{idx}"
+                        name = re.sub(r"[^A-Za-z0-9_-]+", "-", raw_name).strip("-") or f"step_{idx}"
+                        shot_rel = f"evidence/screenshots/{name}.png"
+                        shot_abs = workspace / shot_rel
+                        shot_abs.parent.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(shot_abs), full_page=bool(step.get("full_page")))
+                        rec["screenshot"] = shot_rel
+                    elif act == "assert_text":
+                        actual_txt = redact_text(page.locator(as_text(step["selector"])).inner_text())
+                        rec["actual"] = actual_txt
+                        if "equals" in step and actual_txt != as_text(step["equals"]):
+                            raise AssertionError(f"Expected text == '{step['equals']}', got '{actual_txt}'")
+                        if "contains" in step and as_text(step["contains"]) not in actual_txt:
+                            raise AssertionError(f"Expected text containing '{step['contains']}', got '{actual_txt}'")
+                    elif act == "assert_visible":
+                        vis = page.locator(as_text(step["selector"])).first.is_visible()
+                        rec["visible"] = vis
+                        if not vis:
+                            raise AssertionError(f"Locator '{step['selector']}' is not visible")
+                    elif act == "assert_url":
+                        cur = redact_text(page.url)
+                        rec["url"] = cur
+                        if "contains" in step and as_text(step["contains"]) not in cur:
+                            raise AssertionError(f"Expected URL containing '{step['contains']}', got '{cur}'")
+                    elif act == "audit":
+                        rec["audit"] = _drain_and_audit(page)
+                    else:
+                        raise SystemExit(f"ERROR: Unsupported exec action '{act}' at step #{idx}.")
+                except SystemExit:
+                    raise
+                except Exception as exc:
+                    rec["ok"] = False
+                    rec["error"] = redact_text(str(exc))
+                    ok = False
+                    failed_reason = f"step #{idx} ({act}): {rec['error']}"
+                    step_logs.append(rec)
+                    break
+                step_logs.append(rec)
+
+            probes = _drain_and_audit(page)
+            out = {
+                "ok": ok,
+                "command": "exec",
+                "final_url": redact_text(page.url),
+                "steps": step_logs,
+                **({"error": failed_reason} if failed_reason else {}),
+                **probes,
+            }
+            if out_prefix:
+                shot_rel = f"evidence/screenshots/{out_prefix}_final.png"
+                shot_abs = workspace / shot_rel
+                shot_abs.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(shot_abs))
+                out["screenshot"] = shot_rel
+                out["evidence_json"] = _save_evidence_json(workspace, f"evidence/network/{out_prefix}.json", out)
+            return out
+        finally:
+            context.close()
+    finally:
+        browser.close()
+
+
+_A11Y_FOCUS_JS = """() => {
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) {
+    return { active: false, tag: el ? el.tagName.toLowerCase() : 'none' };
+  }
+  const rect = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const label = (el.innerText || el.getAttribute('aria-label') || el.name || el.id || el.tagName).trim().slice(0, 60);
+  const ow = parseFloat(cs.outlineWidth || '0') || 0;
+  const hasOutline = cs.outlineStyle && cs.outlineStyle !== 'none' && ow > 0;
+  const hasBoxShadow = cs.boxShadow && cs.boxShadow !== 'none';
+  let obscuredBy = null;
+  if (rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth) {
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
+      obscuredBy = (hit.id || hit.className || hit.tagName).toString().slice(0, 60);
+    }
+  }
+  return {
+    active: true,
+    tag: el.tagName.toLowerCase(),
+    id: el.id || '',
+    type: el.getAttribute('type') || '',
+    label,
+    hasFocusIndicator: Boolean(hasOutline || hasBoxShadow),
+    outline: `${cs.outlineStyle} ${cs.outlineWidth}`,
+    boxShadow: cs.boxShadow !== 'none',
+    obscuredBy,
+    inViewport: rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth,
+  };
+}"""
+
+
+def cmd_a11y_keyboard(workspace: Path, meta: dict, args: argparse.Namespace, p) -> dict:
+    origins = _authorized_origins(meta)
+    state_path = _validate_storage_state(workspace, getattr(args, "storage_state", ""), must_exist=True)
+    _check_origin(args.url, origins)
+    vp = _parse_viewport(args.viewport)
+
+    browser = p.chromium.launch(headless=not args.headed)
+    try:
+        context, page = _open_context(browser, meta, viewport=vp, storage_state=state_path)
+        try:
+            _login_if_needed(page, args, origins)
+            page.goto(args.url, wait_until="domcontentloaded")
+            page.wait_for_timeout(args.settle_ms)
+
+            stops: list[dict[str, Any]] = []
+            missing_indicator: list[dict[str, Any]] = []
+            obscured: list[dict[str, Any]] = []
+            seen_keys: list[str] = []
+
+            for step_idx in range(1, args.tabs + 1):
+                page.keyboard.press("Tab")
+                info = page.evaluate(_A11Y_FOCUS_JS)
+                info["tab_step"] = step_idx
+                stops.append(info)
+                if info.get("active"):
+                    key = f"{info.get('tag')}|{info.get('id')}|{info.get('label')}"
+                    seen_keys.append(key)
+                    if not info.get("hasFocusIndicator"):
+                        missing_indicator.append({"tab_step": step_idx, "tag": info.get("tag"), "label": info.get("label")})
+                    if info.get("obscuredBy"):
+                        obscured.append({"tab_step": step_idx, "label": info.get("label"), "coveredBy": info.get("obscuredBy")})
+
+            escape_result: dict[str, Any] | None = None
+            if args.dialog_trigger:
+                page.locator(args.dialog_trigger).first.click()
+                page.wait_for_timeout(150)
+                before_esc = page.evaluate("document.querySelectorAll('[role=\"dialog\"], dialog[open]').length")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(150)
+                after_esc = page.evaluate("document.querySelectorAll('[role=\"dialog\"], dialog[open]').length")
+                escape_result = {
+                    "trigger": args.dialog_trigger,
+                    "open_dialogs_before_escape": before_esc,
+                    "open_dialogs_after_escape": after_esc,
+                    "closed_on_escape": after_esc < before_esc,
+                }
+
+            trapped = len(seen_keys) >= 6 and len(set(seen_keys[-6:])) <= 1
+            probes = _drain_and_audit(page)
+            out: dict[str, Any] = {
+                "ok": True,
+                "command": "a11y-keyboard",
+                "url": redact_text(page.url),
+                "viewport": args.viewport,
+                "tabs_pressed": args.tabs,
+                "unique_focus_targets": len(set(seen_keys)),
+                "suspected_focus_trap": trapped,
+                "missing_focus_indicator": missing_indicator,
+                "obscured_on_focus": obscured,
+                "stops": stops,
+                **({"escape_check": escape_result} if escape_result is not None else {}),
+                **probes,
+            }
+            if args.out_prefix:
+                shot_rel = f"evidence/screenshots/{args.out_prefix}.png"
+                shot_abs = workspace / shot_rel
+                shot_abs.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(shot_abs))
+                out["screenshot"] = shot_rel
+                out["evidence_json"] = _save_evidence_json(workspace, f"evidence/network/{args.out_prefix}.json", out)
+            return out
+        finally:
+            context.close()
+    finally:
+        browser.close()
+
+
 def _add_login_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--login-url", default="")
     p.add_argument("--user", default="")
@@ -360,6 +695,7 @@ def _add_login_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--user-sel", default='input[name="username"], input[name="email"], input[type="email"]')
     p.add_argument("--pass-sel", default='input[name="password"], input[type="password"]')
     p.add_argument("--submit-sel", default='button[type="submit"], input[type="submit"]')
+    p.add_argument("--storage-state", default="", help="Path to Playwright storage_state JSON outside workspace")
     p.add_argument("--headed", action="store_true", help="Run browser in headed mode")
 
 
@@ -410,6 +746,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_az.add_argument("--settle-ms", type=int, default=300)
     p_az.add_argument("--out-prefix", default="")
 
+    p_sa = sub.add_parser("save-auth", help="Log in cleanly and save Playwright storageState outside the workspace")
+    _add_login_flags(p_sa)
+    p_sa.add_argument("--url", default="", help="Alias for --login-url")
+    p_sa.add_argument("--fill", action="append", help="selector=value")
+    p_sa.add_argument("--click", action="append", help="selector to click")
+    p_sa.add_argument("--wait-ms", type=int, default=400)
+    p_sa.add_argument("--out", required=True, help="Output JSON path outside the QA workspace")
+
+    p_ex = sub.add_parser("exec", help="Execute a declarative multi-step JSON browser sequence with assertions and probes")
+    _add_login_flags(p_ex)
+    p_ex.add_argument("--stdin", action="store_true", help="Read exec plan JSON from stdin")
+    p_ex.add_argument("--file", default="", help="Read exec plan JSON from file")
+    p_ex.add_argument("--out-prefix", default="")
+
+    p_ak = sub.add_parser("a11y-keyboard", help="Run automated Tab/Shift/Escape keyboard traversal and WCAG 2.2 focus checks")
+    _add_login_flags(p_ak)
+    p_ak.add_argument("--url", required=True)
+    p_ak.add_argument("--tabs", type=int, default=25)
+    p_ak.add_argument("--viewport", default="1440x900")
+    p_ak.add_argument("--dialog-trigger", default="", help="Optional selector to open a modal/dialog and verify Escape closes it")
+    p_ak.add_argument("--settle-ms", type=int, default=300)
+    p_ak.add_argument("--out-prefix", default="")
+
     return parser
 
 
@@ -442,12 +801,15 @@ def main() -> int:
         "double-submit": cmd_double_submit,
         "reload-check": cmd_reload_check,
         "authz-url": cmd_authz_url,
+        "save-auth": cmd_save_auth,
+        "exec": cmd_exec,
+        "a11y-keyboard": cmd_a11y_keyboard,
     }
     with sync_playwright() as p:
         result = dispatch[args.command](workspace, meta, args, p)
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 0
+    return 0 if result.get("ok", True) else 1
 
 
 if __name__ == "__main__":
