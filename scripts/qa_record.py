@@ -34,6 +34,7 @@ from qa_common import (
     TRIAGE_DISPOSITIONS,
     as_list,
     as_text,
+    merge_meta_patch,
     now_iso,
     read_json,
     write_json_atomic,
@@ -144,6 +145,26 @@ def _sync_case_links(workspace: Path, case: dict) -> None:
             write_json_atomic(ledger_path, ledger_doc)
 
 
+def _prepare_controls(existing: list[dict], items: list[dict]) -> tuple[list[dict], list[str]]:
+    added_ids = []
+    existing_ids = {as_text(r.get("id")) for r in existing if isinstance(r, dict)}
+    out = list(existing)
+    for raw in items:
+        item = dict(raw)
+        for req in ("module", "path", "label", "control"):
+            if not as_text(item.get(req)):
+                raise SystemExit(f"ERROR: Control is missing required '{req}'.")
+        _validate_enum(as_text(item.get("control")), CONTROLS, "control")
+        cid = as_text(item.get("id")) or _next_id(out, "A")
+        if cid in existing_ids:
+            raise SystemExit(f"ERROR: Duplicate control id '{cid}'.")
+        item["id"] = cid
+        existing_ids.add(cid)
+        out.append(item)
+        added_ids.append(cid)
+    return out, added_ids
+
+
 def cmd_add_controls(workspace: Path, args: argparse.Namespace) -> list[str]:
     path = workspace / "02-field-atlas.json"
     doc = _load_doc(path, {"controls": []})
@@ -171,20 +192,7 @@ def cmd_add_controls(workspace: Path, args: argparse.Namespace) -> list[str]:
             }
         ]
 
-    added_ids = []
-    existing_ids = {as_text(r.get("id")) for r in doc["controls"] if isinstance(r, dict)}
-    for item in items:
-        for req in ("module", "path", "label", "control"):
-            if not as_text(item.get(req)):
-                raise SystemExit(f"ERROR: Control is missing required '{req}'.")
-        _validate_enum(as_text(item.get("control")), CONTROLS, "control")
-        cid = as_text(item.get("id")) or _next_id(doc["controls"], "A")
-        if cid in existing_ids:
-            raise SystemExit(f"ERROR: Duplicate control id '{cid}'.")
-        item["id"] = cid
-        existing_ids.add(cid)
-        doc["controls"].append(item)
-        added_ids.append(cid)
+    doc["controls"], added_ids = _prepare_controls(doc["controls"], items)
     write_json_atomic(path, doc)
     return added_ids
 
@@ -695,18 +703,7 @@ def cmd_set_meta(workspace: Path, args: argparse.Namespace) -> list[str]:
     if patches is not None:
         if len(patches) != 1:
             raise SystemExit("ERROR: set-meta expects a single JSON object.")
-        patch = patches[0]
-        if "run_contract" in patch and isinstance(patch["run_contract"], dict) and isinstance(doc.get("run_contract"), dict):
-            rc = dict(doc["run_contract"])
-            rc.update(patch["run_contract"])
-            patch = dict(patch)
-            patch["run_contract"] = rc
-        if "capabilities" in patch and isinstance(patch["capabilities"], dict) and isinstance(doc.get("capabilities"), dict):
-            caps = dict(doc["capabilities"])
-            caps.update(patch["capabilities"])
-            patch = dict(patch)
-            patch["capabilities"] = caps
-        doc.update(patch)
+        doc = merge_meta_patch(doc, patches[0])
     else:
         if args.staging_confirmed:
             doc["staging_confirmed"] = args.staging_confirmed == "true"
@@ -964,6 +961,307 @@ def cmd_import_guided(workspace: Path, args: argparse.Namespace) -> list[str]:
     return updated_ids
 
 
+def _seed_defect_from_case(raw: dict, src: dict) -> dict:
+    cid = as_text(src.get("id"))
+    return {
+        "id": raw.get("id", ""),
+        "title": raw.get("title") or src.get("title", ""),
+        "severity": raw.get("severity") or src.get("severity", ""),
+        "type": raw.get("type") or src.get("defect_type", ""),
+        "module": raw.get("module") or src.get("module", ""),
+        "path": raw.get("path") or src.get("path", ""),
+        "test_case_ids": raw.get("test_case_ids") or [cid],
+        "environment": raw.get("environment", ""),
+        "preconditions": raw.get("preconditions") or src.get("preconditions", ""),
+        "steps": raw.get("steps") or src.get("steps", []),
+        "expected": raw.get("expected") or src.get("expected", ""),
+        "actual": raw.get("actual") or src.get("actual", ""),
+        "evidence": raw.get("evidence") or src.get("evidence", []),
+        "impact": raw.get("impact", ""),
+        "likely_cause": raw.get("likely_cause", ""),
+        "suggestion": raw.get("suggestion") or src.get("suggestion", ""),
+        "workaround": raw.get("workaround", ""),
+        "status": raw.get("status") or "Open",
+        "notes": raw.get("notes") or src.get("notes", ""),
+        "created_at": raw.get("created_at") or now_iso(),
+    }
+
+
+def _sync_links_in_memory(
+    case: dict,
+    controls: list[dict],
+    relationships: list[dict],
+    config_matrix: list[dict],
+) -> tuple[bool, bool, bool]:
+    case_id = as_text(case.get("id"))
+    atlas_ids = {as_text(x) for x in as_list(case.get("atlas_ids")) if as_text(x)}
+    rel_ids = {as_text(x) for x in as_list(case.get("relationship_ids")) if as_text(x)}
+    cfg_ids = {as_text(x) for x in as_list(case.get("config_matrix_ids")) if as_text(x)}
+    c_changed = r_changed = m_changed = False
+
+    if atlas_ids:
+        for ctrl in controls:
+            if isinstance(ctrl, dict) and as_text(ctrl.get("id")) in atlas_ids:
+                updated = _append_unique(ctrl.get("tested_by"), case_id)
+                if updated != ctrl.get("tested_by"):
+                    ctrl["tested_by"] = updated
+                    c_changed = True
+    if rel_ids:
+        for rel in relationships:
+            if isinstance(rel, dict) and as_text(rel.get("id")) in rel_ids:
+                updated = _append_unique(rel.get("verified_by"), case_id)
+                if updated != rel.get("verified_by"):
+                    rel["verified_by"] = updated
+                    r_changed = True
+    if cfg_ids:
+        for entry in config_matrix:
+            if isinstance(entry, dict) and as_text(entry.get("id")) in cfg_ids:
+                updated = _append_unique(entry.get("tested_by"), case_id)
+                if updated != entry.get("tested_by"):
+                    entry["tested_by"] = updated
+                    m_changed = True
+    return c_changed, r_changed, m_changed
+
+
+def cmd_ingest(workspace: Path, args: argparse.Namespace) -> list[str]:
+    """Atomically ingest a multi-artifact JSON bundle into workspace files in one call."""
+    bundles = _read_batch_payload(args)
+    if not bundles or len(bundles) != 1:
+        raise SystemExit("ERROR: ingest expects a single JSON object via --stdin or --file.")
+    bundle = bundles[0]
+
+    meta_path = workspace / "meta.json"
+    atlas_path = workspace / "02-field-atlas.json"
+    rel_path = workspace / "03-relationships.json"
+    cases_path = workspace / "05-test-cases.json"
+    defects_path = workspace / "06-defects.json"
+    ledger_path = workspace / "07-fixtures-and-config-ledger.json"
+    questions_path = workspace / "08-open-questions.json"
+
+    meta_doc = _load_doc(meta_path, {})
+    atlas_doc = _load_doc(atlas_path, {"controls": []})
+    rel_doc = _load_doc(rel_path, {"relationships": []})
+    cases_doc = _load_doc(cases_path, {"test_cases": []})
+    defects_doc = _load_doc(defects_path, {"defects": []})
+    ledger_doc = _load_doc(ledger_path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
+    questions_doc = _load_doc(questions_path, {"items": []})
+
+    summary_ids: list[str] = []
+    dirty_meta = dirty_atlas = dirty_rel = dirty_cases = dirty_defects = dirty_ledger = dirty_questions = False
+
+    if isinstance(bundle.get("meta"), dict):
+        meta_doc = merge_meta_patch(meta_doc, bundle["meta"])
+        dirty_meta = True
+        summary_ids.append("meta.json")
+
+    if bundle.get("controls"):
+        atlas_doc["controls"], cids = _prepare_controls(atlas_doc["controls"], as_list(bundle["controls"]))
+        dirty_atlas = True
+        summary_ids.extend(cids)
+
+    if bundle.get("relationships"):
+        existing_rids = {as_text(r.get("id")) for r in rel_doc["relationships"] if isinstance(r, dict)}
+        for raw in as_list(bundle["relationships"]):
+            item = dict(raw)
+            for req in ("source", "target", "type", "description"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Relationship is missing required '{req}'.")
+            _validate_enum(as_text(item.get("type")), REL_TYPES, "relationship type")
+            _validate_enum(as_text(item.get("confidence")), CONFIDENCES, "confidence")
+            rid = as_text(item.get("id")) or _next_id(rel_doc["relationships"], "R")
+            if rid in existing_rids:
+                raise SystemExit(f"ERROR: Duplicate relationship id '{rid}'.")
+            item["id"] = rid
+            existing_rids.add(rid)
+            rel_doc["relationships"].append(item)
+            summary_ids.append(rid)
+            dirty_rel = True
+
+    if bundle.get("configuration_matrix"):
+        existing_mids = {as_text(r.get("id")) for r in ledger_doc["configuration_matrix"] if isinstance(r, dict)}
+        for raw in as_list(bundle["configuration_matrix"]):
+            item = dict(raw)
+            for req in ("area", "setting", "branch", "profile_value"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Configuration matrix entry is missing required '{req}'.")
+            opts = [as_text(o) for o in as_list(item.get("options")) if as_text(o)]
+            if not opts:
+                raise SystemExit("ERROR: Configuration matrix entry must provide non-empty 'options'.")
+            if as_text(item.get("profile_value")) not in opts:
+                raise SystemExit(f"ERROR: profile_value '{item.get('profile_value')}' is not in options {opts}.")
+            mid = as_text(item.get("id")) or _next_id(ledger_doc["configuration_matrix"], "CFG")
+            if mid in existing_mids:
+                raise SystemExit(f"ERROR: Duplicate configuration matrix id '{mid}'.")
+            item["id"] = mid
+            existing_mids.add(mid)
+            ledger_doc["configuration_matrix"].append(item)
+            summary_ids.append(mid)
+            dirty_ledger = True
+
+    added_cases: list[dict] = []
+    if bundle.get("test_cases"):
+        existing_tcids = {as_text(r.get("id")) for r in cases_doc["test_cases"] if isinstance(r, dict)}
+        for raw in as_list(bundle["test_cases"]):
+            item = dict(raw)
+            _validate_case_fields(item)
+            tcid = as_text(item.get("id")) or _next_id(cases_doc["test_cases"], "TC")
+            if tcid in existing_tcids:
+                raise SystemExit(f"ERROR: Duplicate test case id '{tcid}'.")
+            item["id"] = tcid
+            if as_text(item.get("status")) in ("Pass", "Fail") and not as_text(item.get("executed_at")):
+                item["executed_at"] = now_iso()
+            existing_tcids.add(tcid)
+            cases_doc["test_cases"].append(item)
+            added_cases.append(item)
+            summary_ids.append(tcid)
+            dirty_cases = True
+
+    cases_by_id = {as_text(c.get("id")): c for c in cases_doc["test_cases"] if isinstance(c, dict) and as_text(c.get("id"))}
+    defect_items = list(as_list(bundle.get("defects")))
+    if bundle.get("auto_seed_defects"):
+        already_linked = {
+            as_text(tid)
+            for d in defects_doc["defects"]
+            if isinstance(d, dict)
+            for tid in as_list(d.get("test_case_ids"))
+        } | {
+            as_text(tid)
+            for d in defect_items
+            if isinstance(d, dict)
+            for tid in as_list(d.get("test_case_ids"))
+        } | {as_text(d.get("from_case")) for d in defect_items if isinstance(d, dict) and d.get("from_case")}
+        for tc in added_cases:
+            if as_text(tc.get("status")) == "Fail" and as_text(tc.get("id")) not in already_linked:
+                defect_items.append({"from_case": as_text(tc.get("id"))})
+
+    if defect_items:
+        existing_dids = {as_text(r.get("id")) for r in defects_doc["defects"] if isinstance(r, dict)}
+        for raw in defect_items:
+            raw_dict = dict(raw)
+            from_case = as_text(raw_dict.get("from_case"))
+            if from_case:
+                src = cases_by_id.get(from_case)
+                if src is None:
+                    raise SystemExit(f"ERROR: Source test case '{from_case}' not found for defect.")
+                item = _seed_defect_from_case(raw_dict, src)
+            else:
+                item = raw_dict
+            for req in ("title", "severity", "type", "module", "expected", "actual", "suggestion"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Defect is missing required '{req}'.")
+            if not as_list(item.get("steps")) or not as_list(item.get("evidence")) or not as_list(item.get("test_case_ids")):
+                raise SystemExit("ERROR: Defect requires non-empty 'steps', 'evidence', and 'test_case_ids'.")
+            _validate_enum(as_text(item.get("severity")), SEVERITIES, "severity")
+            _validate_enum(as_text(item.get("type")), DEFECT_TYPES, "defect type")
+            _validate_enum(as_text(item.get("status") or "Open"), DEFECT_STATUSES, "defect status")
+            did = as_text(item.get("id")) or _next_id(defects_doc["defects"], "DEF")
+            if did in existing_dids:
+                raise SystemExit(f"ERROR: Duplicate defect id '{did}'.")
+            item["id"] = did
+            item.setdefault("status", "Open")
+            item.setdefault("created_at", now_iso())
+            existing_dids.add(did)
+            defects_doc["defects"].append(item)
+            summary_ids.append(did)
+            dirty_defects = True
+
+    if bundle.get("fixtures"):
+        existing_fids = {as_text(r.get("id")) for r in ledger_doc["fixtures"] if isinstance(r, dict)}
+        for raw in as_list(bundle["fixtures"]):
+            item = dict(raw)
+            for req in ("name", "purpose"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Fixture is missing required '{req}'.")
+            if item.get("design"):
+                _validate_enum(as_text(item.get("design")), FIXTURE_DESIGNS, "fixture design")
+            fid = as_text(item.get("id")) or _next_id(ledger_doc["fixtures"], "F")
+            if fid in existing_fids:
+                raise SystemExit(f"ERROR: Duplicate fixture id '{fid}'.")
+            item["id"] = fid
+            existing_fids.add(fid)
+            ledger_doc["fixtures"].append(item)
+            summary_ids.append(fid)
+            dirty_ledger = True
+
+    if bundle.get("config_changes"):
+        existing_cids = {as_text(r.get("id")) for r in ledger_doc["config_changes"] if isinstance(r, dict)}
+        for raw in as_list(bundle["config_changes"]):
+            item = dict(raw)
+            for req in ("path", "original", "changed_to"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Config change is missing required '{req}'.")
+            cid = as_text(item.get("id")) or _next_id(ledger_doc["config_changes"], "C")
+            if cid in existing_cids:
+                raise SystemExit(f"ERROR: Duplicate config change id '{cid}'.")
+            item["id"] = cid
+            item.setdefault("restored", False)
+            item.setdefault("changed_at", now_iso())
+            existing_cids.add(cid)
+            ledger_doc["config_changes"].append(item)
+            summary_ids.append(cid)
+            dirty_ledger = True
+
+    if bundle.get("config_restores"):
+        cfg_by_id = {as_text(c.get("id")): c for c in ledger_doc["config_changes"] if isinstance(c, dict) and as_text(c.get("id"))}
+        for raw in as_list(bundle["config_restores"]):
+            cid = as_text(raw.get("id"))
+            target = cfg_by_id.get(cid)
+            if target is None:
+                raise SystemExit(f"ERROR: Config change '{cid}' not found for restore.")
+            target["restored"] = True
+            target["restored_at"] = as_text(raw.get("restored_at")) or now_iso()
+            target["restored_value"] = as_text(raw.get("restored_value")) or target.get("original", "")
+            if raw.get("evidence"):
+                target["evidence"] = raw["evidence"]
+            if raw.get("notes"):
+                target["notes"] = raw["notes"]
+            summary_ids.append(cid)
+            dirty_ledger = True
+
+    if bundle.get("questions"):
+        existing_qids = {as_text(r.get("id")) for r in questions_doc["items"] if isinstance(r, dict)}
+        for raw in as_list(bundle["questions"]):
+            item = dict(raw)
+            for req in ("type", "description"):
+                if not as_text(item.get(req)):
+                    raise SystemExit(f"ERROR: Question is missing required '{req}'.")
+            _validate_enum(as_text(item.get("type")), QUESTION_TYPES, "question type")
+            _validate_enum(as_text(item.get("status") or "Open"), QUESTION_STATUSES, "question status")
+            qid = as_text(item.get("id")) or _next_id(questions_doc["items"], "Q")
+            if qid in existing_qids:
+                raise SystemExit(f"ERROR: Duplicate question id '{qid}'.")
+            item["id"] = qid
+            item.setdefault("status", "Open")
+            existing_qids.add(qid)
+            questions_doc["items"].append(item)
+            summary_ids.append(qid)
+            dirty_questions = True
+
+    for tc in added_cases:
+        c_ch, r_ch, m_ch = _sync_links_in_memory(
+            tc, atlas_doc["controls"], rel_doc["relationships"], ledger_doc["configuration_matrix"]
+        )
+        dirty_atlas = dirty_atlas or c_ch
+        dirty_rel = dirty_rel or r_ch
+        dirty_ledger = dirty_ledger or m_ch
+
+    if dirty_meta:
+        write_json_atomic(meta_path, meta_doc)
+    if dirty_atlas:
+        write_json_atomic(atlas_path, atlas_doc)
+    if dirty_rel:
+        write_json_atomic(rel_path, rel_doc)
+    if dirty_cases:
+        write_json_atomic(cases_path, cases_doc)
+    if dirty_defects:
+        write_json_atomic(defects_path, defects_doc)
+    if dirty_ledger:
+        write_json_atomic(ledger_path, ledger_doc)
+    if dirty_questions:
+        write_json_atomic(questions_path, questions_doc)
+    return summary_ids
+
+
 def _add_batch_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--stdin", action="store_true", help="Read a JSON object or array from stdin")
     p.add_argument("--file", default="", help="Read a JSON object or array from a file")
@@ -1199,6 +1497,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_ig = sub.add_parser("import-guided", help="Import human-filled Guided_Execution_*.xlsx results")
     p_ig.add_argument("--file", required=True, help="Path to filled Guided_Execution_*.xlsx")
 
+    p_ing = sub.add_parser("ingest", help="Atomically ingest a multi-artifact JSON bundle in one call")
+    _add_batch_flags(p_ing)
+
     return parser
 
 
@@ -1226,6 +1527,7 @@ def main() -> int:
         "add-question": cmd_add_questions,
         "update-question": cmd_update_question,
         "import-guided": cmd_import_guided,
+        "ingest": cmd_ingest,
     }
     ids = dispatch[args.command](workspace, args)
     print(json.dumps({"ok": True, "command": args.command, "ids": ids}))

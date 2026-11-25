@@ -36,7 +36,7 @@ INITIAL_STATE = {
             "unit_price": 50.00,
             "discount_pct": 10.0,
             "status": "Draft",
-            "note": "Initial staging order",
+            "note": "alpha priority shipment",
         },
         {
             "id": 2,
@@ -46,7 +46,7 @@ INITIAL_STATE = {
             "unit_price": 80.00,
             "discount_pct": 0.0,
             "status": "Confirmed",
-            "note": "alpha priority shipment",
+            "note": "Initial staging order",
         },
     ],
     "next_order_id": 3,
@@ -97,6 +97,7 @@ def render_page(title: str, role: str | None, body_html: str) -> bytes:
             f'<a href="/orders">Orders</a>'
             f'<a href="/settings">Settings</a>'
             f'<a href="/support">Support</a>'
+            f'<a href="/copilot">Copilot</a>'
             f'<span class="role-badge">Role: {html.escape(role)}</span>'
             f'<form method="post" action="/logout" style="display:inline"><button type="submit">Logout</button></form>'
             f"</nav>"
@@ -241,6 +242,11 @@ class GymHandler(BaseHTTPRequestHandler):
               <p>Policy: Discount is applied BEFORE 10% tax. {html.escape(free_shipping_note)}</p>
               <label>Search Orders: <input id="order-search" placeholder="Type query..."></label>
               <button type="button" id="reserve-btn">Reserve Inventory</button>
+              <div id="status-tabs" style="margin-top:10px; display:flex; gap:8px;">
+                <button type="button" class="tab-btn" data-tab="all">All</button>
+                <button type="button" class="tab-btn" data-tab="draft">Draft</button>
+                <button type="button" class="tab-btn" data-tab="confirmed">Confirmed</button>
+              </div>
             </div>
             <div class="card">
               <h2>Create Order</h2>
@@ -263,6 +269,17 @@ class GymHandler(BaseHTTPRequestHandler):
             <script>
               const searchEl = document.getElementById('order-search');
               const tbody = document.getElementById('orders-tbody');
+              // BUG-10: Updates URL query ?tab=... on click, but ignores ?tab= on initial page load / reload!
+              document.querySelectorAll('.tab-btn').forEach(btn => {{
+                btn.addEventListener('click', () => {{
+                  const tab = btn.dataset.tab;
+                  history.replaceState(null, '', tab === 'all' ? '/orders' : '/orders?tab=' + encodeURIComponent(tab));
+                  for (const tr of tbody.querySelectorAll('tr')) {{
+                    const st = (tr.children[5]?.textContent || '').trim().toLowerCase();
+                    tr.style.display = (tab === 'all' || st === tab) ? '' : 'none';
+                  }}
+                }});
+              }});
               searchEl.addEventListener('input', async (e) => {{
                 const q = e.target.value;
                 // BUG-04: No AbortController or sequence check -> slow earlier query overwrites newer one
@@ -314,6 +331,10 @@ class GymHandler(BaseHTTPRequestHandler):
                 <button type="submit">Save Note</button>
               </form>
               <p id="note-display">{html.escape(order['note'])}</p>
+              <div style="margin-top:12px;">
+                <label><input type="checkbox" id="priority-toggle"> Priority Fulfillment</label>
+                <span id="priority-status">Normal</span>
+              </div>
             </div>
             <script>
               document.getElementById('note-form').addEventListener('submit', (e) => {{
@@ -321,6 +342,16 @@ class GymHandler(BaseHTTPRequestHandler):
                 const val = document.getElementById('note-input').value;
                 document.getElementById('note-display').textContent = val;
                 localStorage.setItem('qa_gym_ephemeral_note', val);
+              }});
+              // BUG-09: Optimistic UI updates toggle + label immediately, never rolls back on HTTP 409!
+              document.getElementById('priority-toggle').addEventListener('change', async (e) => {{
+                const checked = e.target.checked;
+                document.getElementById('priority-status').textContent = checked ? 'Priority' : 'Normal';
+                await fetch('/api/orders/priority', {{
+                  method: 'POST',
+                  headers: {{'Content-Type': 'application/json'}},
+                  body: JSON.stringify({{id: {oid}, priority: checked}})
+                }});
               }});
             </script>"""
             self._send_html(200, render_page(f"Order #{oid}", role, body))
@@ -382,6 +413,63 @@ class GymHandler(BaseHTTPRequestHandler):
             self._send_html(200, render_page("Support", role, body))
             return
 
+        if path == "/copilot":
+            body = """
+            <div class="card">
+              <h1>AI Support Copilot</h1>
+              <p>Answers customer questions grounded strictly in existing Support Tickets (#101, #102).</p>
+              <input id="copilot-q" value="Can customer get a VIP refund waiver?" style="width:320px">
+              <button type="button" id="copilot-ask">Ask Copilot</button>
+              <div id="copilot-out" style="margin-top:12px; font-weight:600;"></div>
+              <div id="copilot-citations" class="policy-note"></div>
+            </div>
+            <script>
+              document.getElementById('copilot-ask').addEventListener('click', async () => {
+                const q = document.getElementById('copilot-q').value;
+                const out = document.getElementById('copilot-out');
+                const cit = document.getElementById('copilot-citations');
+                out.textContent = 'Streaming...';
+                cit.textContent = '';
+                const res = await fetch('/api/copilot/stream?q=' + encodeURIComponent(q));
+                const reader = res.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '';
+                while (true) {
+                  const {done, value} = await reader.read();
+                  if (done) break;
+                  buf += dec.decode(value, {stream: true});
+                  for (const line of buf.split('\\n')) {
+                    if (line.startsWith('data: ')) {
+                      const msg = JSON.parse(line.slice(6));
+                      if (msg.token) out.textContent = (out.textContent === 'Streaming...' ? '' : out.textContent) + msg.token;
+                      if (msg.citation) cit.textContent = msg.citation;
+                    }
+                  }
+                  buf = '';
+                }
+              });
+            </script>"""
+            self._send_html(200, render_page("Copilot", role, body))
+            return
+
+        if path == "/api/copilot/stream":
+            # BUG-11: SSE text/event-stream emitting an ungrounded/hallucinated citation (Ticket #999 does not exist)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            chunks = [
+                {"token": "Yes, VIP refunds are approved "},
+                {"token": "automatically under policy."},
+                {"citation": "Source: Ticket #999 - VIP Refund Waiver"},
+            ]
+            for chunk in chunks:
+                line = f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                self.wfile.write(line)
+                self.wfile.flush()
+                time.sleep(0.04)
+            return
+
         if path == "/api/orders":
             q = (qs.get("q", [""])[0] or "").strip().lower()
             # BUG-04: Longer/earlier query "alpha" sleeps longer than "beta"
@@ -432,6 +520,11 @@ class GymHandler(BaseHTTPRequestHandler):
         if path == "/graphql":
             # BUG-06: HTTP 200 with GraphQL errors
             self._send_json(200, {"data": None, "errors": [{"message": "Inventory lock failed for SKU"}]})
+            return
+
+        if path == "/api/orders/priority":
+            # BUG-09: Rejects with HTTP 409 Conflict; frontend fails to roll back optimistic toggle
+            self._send_json(409, {"error": "Locked order cannot change priority"})
             return
 
         if path == "/api/orders":

@@ -514,6 +514,63 @@ def _looks_like_placeholder(value: str) -> bool:
     return "[redacted]" in lowered or "redacted" in lowered
 
 
+def redact_text(text: str) -> str:
+    """Mask URL credentials, bearer tokens, private keys, and secret/password assignments."""
+    if not text:
+        return text
+    out = re.sub(
+        r"([a-z][a-z0-9+.-]*://)([^/\s:@]+:[^/\s@]+)@",
+        r"\1[REDACTED]@",
+        text,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{12,}=*",
+        "Bearer [REDACTED]",
+        out,
+    )
+    out = re.sub(
+        r"([?&](?:token|access_token|refresh_token|code|key|api_key|apikey|secret|password|pwd|jwt|session|auth)=)([^&#\s]+)",
+        r"\1[REDACTED]",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"(?i)(\b(?:password|passwd|pwd|api[_-]?key|secret|client[_-]?secret|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*[\"']?)([^\s\"'<>]{4,})",
+        lambda m: m.group(0) if _looks_like_placeholder(m.group(2)) else f"{m.group(1)}[REDACTED]",
+        out,
+    )
+    out = re.sub(
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "[REDACTED PRIVATE KEY]",
+        out,
+    )
+    return out
+
+
+def merge_meta_patch(doc: dict, patch: dict) -> dict:
+    """Merge a partial meta.json patch without clobbering nested capabilities or run_contract."""
+    merged = dict(doc)
+    for key, val in patch.items():
+        if key == "capabilities" and isinstance(val, dict) and isinstance(merged.get("capabilities"), dict):
+            caps = dict(merged["capabilities"])
+            caps.update(val)
+            merged["capabilities"] = caps
+        elif key == "run_contract" and isinstance(val, dict) and isinstance(merged.get("run_contract"), dict):
+            rc = dict(merged["run_contract"])
+            for rk, rv in val.items():
+                if rk == "time_anchor" and isinstance(rv, dict) and isinstance(rc.get("time_anchor"), dict):
+                    ta = dict(rc["time_anchor"])
+                    ta.update(rv)
+                    rc["time_anchor"] = ta
+                else:
+                    rc[rk] = rv
+            merged["run_contract"] = rc
+        else:
+            merged[key] = val
+    return merged
+
+
 def scan_secrets(workspace: str | Path) -> list:
     ws = Path(workspace).resolve()
     issues: list = []
@@ -1420,6 +1477,21 @@ def coverage(loaded: dict) -> dict:
     in_scope_without_cases = [m for m in in_scope_modules if m not in modules_with_cases]
 
     status_total = sum(status_counts.get(status, 0) for status in STATUSES)
+
+    surface_counts: dict[str, int] = {}
+    multi_surface_cases = 0
+    technique_counts: dict[str, int] = {}
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        tech = as_text(case.get("technique")) or "(unspecified)"
+        technique_counts[tech] = technique_counts.get(tech, 0) + 1
+        if as_text(case.get("status")) in executed_statuses:
+            surfaces = [as_text(s).lower() for s in as_list(case.get("surfaces_checked")) if as_text(s)]
+            if len(set(surfaces)) >= 2:
+                multi_surface_cases += 1
+            for s in set(surfaces):
+                surface_counts[s] = surface_counts.get(s, 0) + 1
     reconciliation = {
         "atlas_coverage_mode": atlas_mode,
         "controls_total": len(controls),
@@ -1491,6 +1563,9 @@ def coverage(loaded: dict) -> dict:
         "pass_rate": pass_rate,
         "module_rows": sorted(module_rows.values(), key=lambda row: row["module"].lower()),
         "category_rows": sorted(category_rows.values(), key=lambda row: row["category"].lower()),
+        "technique_counts": dict(sorted(technique_counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))),
+        "surface_counts": dict(sorted(surface_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "multi_surface_cases": multi_surface_cases,
         "roles": sorted({as_text(c.get("role")) for c in cases if isinstance(c, dict) and as_text(c.get("role"))}),
         "in_scope_modules": in_scope_modules,
         "triage_counts": triage_counts,

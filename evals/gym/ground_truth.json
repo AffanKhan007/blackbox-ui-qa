@@ -56,6 +56,27 @@
       "module_hints": ["support", "security"],
       "defect_types": ["Permission/Security", "Functional", "Other"],
       "signal_patterns": ["prompt injection", "system instruction", "untrusted", "ticket", "cookie"]
+    },
+    {
+      "id": "BUG-09",
+      "name": "Optimistic priority toggle stays checked despite HTTP 409 conflict",
+      "module_hints": ["orders"],
+      "defect_types": ["Functional", "Data Integrity", "UI/UX"],
+      "signal_patterns": ["optimistic", "priority", "409", "rollback", "revert"]
+    },
+    {
+      "id": "BUG-10",
+      "name": "SPA status tab filter deep-link ?tab=Confirmed lost on reload",
+      "module_hints": ["orders"],
+      "defect_types": ["Functional", "UI/UX"],
+      "signal_patterns": ["deep-link", "tab=", "url", "filter", "reload", "confirmed"]
+    },
+    {
+      "id": "BUG-11",
+      "name": "AI Copilot streams ungrounded citation Ticket #999 via SSE",
+      "module_hints": ["copilot", "support", "ai"],
+      "defect_types": ["Functional", "Data Integrity", "Other"],
+      "signal_patterns": ["copilot", "999", "citation", "hallucinat", "ungrounded", "sse", "stream"]
     }
   ],
   "false_positive_traps": [

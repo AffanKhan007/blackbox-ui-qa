@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackbox UI QA Report — Demo SaaS</title>
+<style>
+  :root { --navy:#1F3864; --blue:#2F5597; --bg:#f5f7fb; --card:#ffffff; --border:#d9e1ec; --text:#182230; --muted:#5a6778; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.45; }
+  header { background:var(--navy); color:#fff; padding:20px 28px; }
+  header h1 { margin:0 0 4px; font-size:22px; }
+  header .sub { color:#d9e2f3; font-size:13px; }
+  main { max-width:1360px; margin:0 auto; padding:20px 24px 48px; }
+  .banner-draft { background:#c00000; color:#fff; padding:10px 16px; border-radius:6px; font-weight:700; margin-bottom:16px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:12px; margin-bottom:20px; }
+  .kpi { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+  .kpi .lbl { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .kpi .val { font-size:22px; font-weight:700; color:var(--navy); margin-top:4px; }
+  .filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:20px; }
+  .filters input, .filters select { padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; }
+  h2 { color:var(--navy); margin:24px 0 12px; font-size:18px; border-bottom:2px solid var(--border); padding-bottom:6px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; padding:12px 16px; }
+  .card summary { cursor:pointer; font-size:15px; }
+  .card-body { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); font-size:14px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+  .sev-critical { background:#c00000; color:#fff; }
+  .sev-high { background:#ffc7ce; color:#9c0006; }
+  .sev-medium { background:#ffeb9c; color:#9c6500; }
+  .sev-low { background:#ddebf7; color:#1f4e79; }
+  .st-pass { background:#c6efce; color:#006100; }
+  .st-fail { background:#ffc7ce; color:#9c0006; }
+  .st-blocked { background:#d9d9d9; color:#404040; }
+  .st-needs-clarification { background:#ffeb9c; color:#9c6500; }
+  .st-observation { background:#ddebf7; color:#1f4e79; }
+  .st-not-run { background:#ededed; color:#595959; }
+  .table-wrap { overflow-x:auto; background:var(--card); border:1px solid var(--border); border-radius:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { background:var(--navy); color:#fff; text-align:left; padding:10px; position:sticky; top:0; }
+  td { border-top:1px solid var(--border); padding:9px 10px; vertical-align:top; }
+  tr:nth-child(even) td { background:#f9fbfe; }
+  .ev-thumb { display:block; max-width:220px; max-height:130px; margin-top:4px; border:1px solid var(--border); border-radius:4px; }
+  .ev-item { margin-bottom:4px; }
+  .muted { color:var(--muted); }
+  .small { font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Blackbox UI QA Report — Demo SaaS</h1>
+  <div class="sub">staging | https://demo.example.test | Depth: Deep | Mode: browser | Generated 2026-11-25 19:03</div>
+</header>
+<main>
+  
+  <section class="kpis">
+    <div class="kpi"><div class="lbl">Test Cases</div><div class="val">5</div></div>
+    <div class="kpi"><div class="lbl">Pass / Fail</div><div class="val">2 / 1</div></div>
+    <div class="kpi"><div class="lbl">Pass Rate</div><div class="val">66.7%</div></div>
+    <div class="kpi"><div class="lbl">Defects</div><div class="val">1</div></div>
+    <div class="kpi"><div class="lbl">Reconciliation</div><div class="val">OK</div></div>
+    <div class="kpi"><div class="lbl">Open Questions</div><div class="val">2</div></div>
+  </section>
+
+  <div class="filters">
+    <input id="q-search" type="search" placeholder="Search title, module, expected/actual...">
+    <select id="q-module"><option value="">All modules</option><option value="customers">Customers</option><option value="orders">Orders</option></select>
+    <select id="q-status"><option value="">All statuses</option><option value="pass">Pass</option><option value="fail">Fail</option><option value="blocked">Blocked</option><option value="needs clarification">Needs Clarification</option><option value="observation">Observation</option><option value="not run">Not Run</option></select>
+    <select id="q-sev"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+  </div>
+
+  <h2>Confirmed Defects (1)</h2>
+  <section id="defects-list"><details class="card defect-card" open data-module="orders" data-severity="high"><summary><span class="badge sev-high">High</span> <strong>[DEF-0001] Quantity zero is accepted on order save</strong> <span class="muted">(Orders · Validation · Open)</span></summary><div class="card-body"><p><strong>Area:</strong> <code>Orders &gt; Detail &gt; Quantity</code> | <strong>Test Cases:</strong> TC-0002</p><p><strong>Oracle:</strong> TC-0002: In-app policy — 03-rules.md RULE-002 (High): Saving quantity 0 must fail validation.</p><p><strong>Expected:</strong> Inline validation error; order not saved.</p><p><strong>Actual:</strong> Order saved with quantity 0 and persisted after reload.</p><p><strong>Impact:</strong> Invalid zero-qty orders persist and distort customer totals.</p><p><strong>Likely Cause:</strong> Missing server-side minimum validation (hypothesis).</p><p><strong>Suggested Fix:</strong> Enforce minimum &gt;= 1 server-side and display inline error.</p><p><strong>Steps:</strong></p><ol><li>Open a new order.</li><li>Set Quantity to 0.</li><li>Click Save and reload.</li></ol><div class="ev-wrap"><strong>Evidence:</strong><div class="ev-item"><a href="evidence/snapshots/TC-0002.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0002.txt</a></div></div></div></details></section>
+
+  <h2>Test Cases (5)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>Module / Path</th><th>Title &amp; Outcome</th><th>Role</th><th>Status</th><th>Severity</th><th>Surfaces</th><th>Oracle</th><th>Evidence</th></tr></thead>
+      <tbody><tr class="case-row" data-module="orders" data-status="pass" data-severity="none"><td><strong>TC-0001</strong></td><td>Orders<div class="muted small">Orders &gt; Detail &gt; Status</div></td><td><strong>Confirmed order decrements Customer Open orders across reload</strong><div class="muted small">Expected: Open orders decreases from 2 to 1.<br>Actual: Open orders decreased from 2 to 1 immediately, after reload, and on summary.</div></td><td>Admin</td><td><span class="badge st-pass">Pass</span></td><td>None</td><td class="small">immediate; reload; summary; network</td><td class="small">Consistency invariant — 03-rules.md RULE-001; calc/TC-0001.py (High): Open orders decreases by 1 after confirmation.</td><td><div class="ev-item"><a href="evidence/snapshots/TC-0001.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0001.txt</a></div><div class="ev-item"><a href="evidence/network/TC-0001.json" target="_blank" rel="noopener">evidence/network/TC-0001.json</a></div><div class="ev-item"><a href="calc/TC-0001.py" target="_blank" rel="noopener">calc/TC-0001.py</a></div></td></tr><tr class="case-row" data-module="orders" data-status="fail" data-severity="high"><td><strong>TC-0002</strong></td><td>Orders<div class="muted small">Orders &gt; Detail &gt; Quantity</div></td><td><strong>Quantity zero is accepted on order save</strong><div class="muted small">Expected: Inline validation error; order not saved.<br>Actual: Order saved with quantity 0 and persisted after reload.</div></td><td>Admin</td><td><span class="badge st-fail">Fail</span></td><td>High</td><td class="small">immediate; reload; list</td><td class="small">In-app policy — 03-rules.md RULE-002 (High): Saving quantity 0 must fail validation.</td><td><div class="ev-item"><a href="evidence/snapshots/TC-0002.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0002.txt</a></div></td></tr><tr class="case-row" data-module="orders" data-status="blocked" data-severity="none"><td><strong>TC-0003</strong></td><td>Orders<div class="muted small">Orders &gt; List &gt; Export</div></td><td><strong>Viewer export permission enforcement</strong><div class="muted small">Expected: Export action denied.<br>Actual: Export control hidden in UI; server endpoint behavior unverified.</div></td><td>Viewer</td><td><span class="badge st-blocked">Blocked</span></td><td>None</td><td class="small">-</td><td class="small">In-app policy — 03-rules.md RULE-003 (Medium)</td><td><div class="ev-item"><a href="evidence/snapshots/TC-0003.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0003.txt</a></div></td></tr><tr class="case-row" data-module="orders" data-status="observation" data-severity="low"><td><strong>TC-0004</strong></td><td>Orders<div class="muted small">Orders &gt; Detail</div></td><td><strong>Status label differs between detail and list</strong><div class="muted small">Expected: Same label on both screens.<br>Actual: Detail says &#x27;Status&#x27;; list header says &#x27;State&#x27;.</div></td><td>Admin</td><td><span class="badge st-observation">Observation</span></td><td>Low</td><td class="small">-</td><td class="small">Consistency invariant — Same field should share one label (Medium)</td><td><div class="ev-item"><a href="evidence/snapshots/TC-0004.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0004.txt</a></div></td></tr><tr class="case-row" data-module="customers" data-status="pass" data-severity="none"><td><strong>TC-0005</strong></td><td>Customers<div class="muted small">Customers &gt; Summary &gt; Open total</div></td><td><strong>Customer Open total matches line qty * price + 10% tax</strong><div class="muted small">Expected: 110.00<br>Actual: 110.00 after reload and on summary.</div></td><td>Viewer</td><td><span class="badge st-pass">Pass</span></td><td>None</td><td class="small">immediate; reload; summary</td><td class="small">Calculation — calc/TC-0005.py (High)</td><td><div class="ev-item"><a href="evidence/snapshots/TC-0005.txt" target="_blank" rel="noopener">evidence/snapshots/TC-0005.txt</a></div><div class="ev-item"><a href="calc/TC-0005.py" target="_blank" rel="noopener">calc/TC-0005.py</a></div></td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Open Questions &amp; Limitations (2)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Description</th><th>Impact</th></tr></thead>
+      <tbody><tr><td>Q-0001</td><td>Question</td><td>Open</td><td>Should Cancelled orders also leave Customer Open orders?</td><td>Defines summary oracle for cancelled orders.</td></tr><tr><td>Q-0002</td><td>Limitation</td><td>Open</td><td>Viewer server-side export enforcement unverified.</td><td>Partial permission coverage.</td></tr></tbody>
+    </table>
+  </div>
+</main>
+<script>
+  const search = document.getElementById('q-search');
+  const modSel = document.getElementById('q-module');
+  const stSel = document.getElementById('q-status');
+  const sevSel = document.getElementById('q-sev');
+  function applyFilters() {
+    const q = (search.value || '').trim().toLowerCase();
+    const mod = modSel.value;
+    const st = stSel.value;
+    const sev = sevSel.value;
+    for (const el of document.querySelectorAll('.defect-card')) {
+      const ok = (!mod || el.dataset.module === mod) && (!sev || el.dataset.severity === sev) && (!q || el.textContent.toLowerCase().includes(q));
+      el.style.display = ok ? '' : 'none';
+    }
+    for (const el of document.querySelectorAll('.case-row')) {
+      const ok = (!mod || el.dataset.module === mod) && (!st || el.dataset.status === st) && (!sev || el.dataset.severity === sev) && (!q || el.textContent.toLowerCase().includes(q));
+      el.style.display = ok ? '' : 'none';
+    }
+  }
+  [search, modSel, stSel, sevSel].forEach(el => el.addEventListener('input', applyFilters));
+</script>
+</body>
+</html>

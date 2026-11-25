@@ -411,6 +411,9 @@ def main() -> int:
         assert wb["Test Cases"]["O3"].value == "Fail"
         assert wb["Defects"].max_row == 2
         assert wb["Field Atlas"].max_column == 17
+        cov_values = [c.value for r in wb["Coverage"].iter_rows() for c in r if c.value is not None]
+        assert "Journey, invariant & multi-surface persistence" in cov_values, cov_values
+        assert "Coverage by technique / risk strategy" in cov_values, cov_values
 
         # Guided sheet export + import-guided round-trip
         guided = workspace / "guided.xlsx"
@@ -420,11 +423,70 @@ def main() -> int:
         assert gwb.sheetnames == ["Guided Execution"]
         assert gwb["Guided Execution"].max_row == 5
 
-        # Verify DEFECTS.md generated beside report.xlsx with oracle joined from TC-0002
+        # Verify DEFECTS.md and REPORT.html generated beside report.xlsx with oracle joined from TC-0002
         defects_md = workspace / "DEFECTS.md"
         assert defects_md.is_file(), "DEFECTS.md should be generated beside report.xlsx"
         defects_md_text = defects_md.read_text(encoding="utf-8")
         assert "[DEF-0001]" in defects_md_text and "calc/TC-0002.py" in defects_md_text
+
+        html_report = workspace / "REPORT.html"
+        assert html_report.is_file(), "REPORT.html should be generated beside report.xlsx"
+        html_text = html_report.read_text(encoding="utf-8")
+        assert "Blackbox UI QA Report" in html_text and "[DEF-0001]" in html_text
+
+        # Test qa_record.py ingest one-shot multi-artifact ingestion (with auto_seed_defects)
+        ingest_ws = Path(temp) / "ingest-ws"
+        assert run(str(SCRIPTS / "init_workspace.py"), "--app", "Ingest App", "--url", "https://staging.example.com", "--module", "Billing", "--workspace", str(ingest_ws)).returncode == 0
+        (ingest_ws / "01-app-map.md").write_text("| S-001 | Billing | Admin | /billing | visited | none | ok |\n", encoding="utf-8")
+        (ingest_ws / "evidence/snapshots/IN-1.txt").write_text("Ingest snapshot <script>alert(1)</script>\n", encoding="utf-8")
+        (ingest_ws / "calc/TC-0001.py").write_text("assert 1 + 1 == 2\n", encoding="utf-8")
+        record(
+            ingest_ws,
+            "ingest",
+            {
+                "meta": {
+                    "staging_confirmed": True,
+                    "roles": ["Admin"],
+                    "in_scope_modules": ["Billing"],
+                    "run_contract": {
+                        "authorized_origins": ["https://staging.example.com"],
+                        "forbidden_actions": ["delete real records"],
+                        "mutation_budget": "5 records",
+                        "time_anchor": {"user_timezone": "UTC", "tenant_timezone": "UTC", "can_freeze_time": False},
+                    },
+                },
+                "controls": [{"state_id": "S-001", "module": "Billing", "path": "Billing > Total", "label": "Total", "control": "computed"}],
+                "test_cases": [
+                    {
+                        "module": "Billing",
+                        "path": "Billing > Total",
+                        "title": "XSS-safe HTML report escaping & auto-seeded defect",
+                        "category": "Business Rules & Calculation",
+                        "technique": "Invariant",
+                        "priority": "P0",
+                        "reason": "Verify ingest + HTML escaping",
+                        "role": "Admin",
+                        "steps": ["Open Billing."],
+                        "oracle": {"type": "Calculation", "source": "calc/TC-0001.py", "confidence": "High"},
+                        "expected": "2.00",
+                        "actual": "<script>alert('xss')</script> 3.00",
+                        "status": "Fail",
+                        "severity": "High",
+                        "defect_type": "Calculation",
+                        "atlas_ids": ["A-0001"],
+                        "evidence": ["evidence/snapshots/IN-1.txt", "calc/TC-0001.py"],
+                        "suggestion": "Fix calc.",
+                        "triage": {"disposition": "Defect", "reason": "Reproduced cleanly."},
+                    }
+                ],
+                "auto_seed_defects": True,
+            },
+        )
+        val_in = run(str(SCRIPTS / "validate_workspace.py"), str(ingest_ws), "--strict")
+        assert val_in.returncode == 0, val_in.stdout + val_in.stderr
+        assert run(str(SCRIPTS / "build_report.py"), str(ingest_ws)).returncode == 0
+        ingest_html = (ingest_ws / "REPORT.html").read_text(encoding="utf-8")
+        assert "&lt;script&gt;alert" in ingest_html and "<script>alert('xss')</script>" not in ingest_html
 
         # Test new qa_record.py lifecycle subcommands + batch restore-config + import-guided
         res = run(
@@ -653,6 +715,185 @@ def main() -> int:
             reset_req = urllib.request.Request(f"http://127.0.0.1:{port}/__qa_reset", data=b"{}", method="POST")
             with opener.open(reset_req) as resp:
                 assert json.loads(resp.read().decode("utf-8"))["reset"] is True
+
+            # Live pw_probe.py integration check against the Gym (if Playwright Chromium is available)
+            try:
+                from playwright.sync_api import sync_playwright  # noqa: F401
+                pw_ok = True
+            except ImportError:
+                pw_ok = False
+            if pw_ok:
+                pw_ws = Path(temp) / "pw-gym-ws"
+                base_url = f"http://127.0.0.1:{port}"
+                assert run(str(SCRIPTS / "init_workspace.py"), "--app", "PW Gym", "--url", base_url, "--module", "Orders", "--workspace", str(pw_ws)).returncode == 0
+                record(pw_ws, "set-meta", {"staging_confirmed": True, "run_contract": {"authorized_origins": [base_url]}})
+
+                # Unauthorized origin must be blocked
+                bad_res = run(str(SCRIPTS / "pw_probe.py"), str(pw_ws), "sweep", "--url", "https://unauthorized.example.test")
+                assert bad_res.returncode != 0
+
+                # Sweep mobile + desktop viewports with browser_probes.js addInitScript
+                sw_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "sweep",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--url",
+                    f"{base_url}/orders",
+                    "--viewport",
+                    "1440x900",
+                    "--viewport",
+                    "390x844",
+                )
+                assert sw_res.returncode == 0, sw_res.stderr
+                sw_json = json.loads(sw_res.stdout)
+                mobile_rec = next(r for r in sw_json["results"] if r["viewport"] == "390x844")
+                assert mobile_rec["audit"]["overflowX"] is True, mobile_rec
+                assert (pw_ws / mobile_rec["screenshot"]).is_file()
+
+                # Race-search deterministically catches slow "alpha" overwriting "beta" (BUG-04)
+                rs_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "race-search",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--url",
+                    f"{base_url}/orders",
+                    "--selector",
+                    "#order-search",
+                    "--query-a",
+                    "alpha",
+                    "--query-b",
+                    "beta",
+                    "--delay-ms",
+                    "30",
+                    "--settle-ms",
+                    "650",
+                    "--result-selector",
+                    "#orders-tbody",
+                    "--out-prefix",
+                    "race_check",
+                )
+                assert rs_res.returncode == 0, rs_res.stderr
+                rs_json = json.loads(rs_res.stdout)
+                assert rs_json["final_input_value"] == "beta"
+                assert "Acme Retail" in rs_json["settled_text"], f"Expected slow alpha result to overwrite beta: {rs_json}"
+
+                # Double-submit probe with CSS attribute selector --fill
+                ds_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "double-submit",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--url",
+                    f"{base_url}/orders",
+                    "--fill",
+                    'input[name="customer"]=QA_SMOKE_DBL',
+                    "--submit-selector",
+                    "#create-order-btn",
+                    "--count-selector",
+                    "#orders-tbody tr",
+                )
+                assert ds_res.returncode == 0, ds_res.stderr
+                ds_json = json.loads(ds_res.stdout)
+                assert ds_json["post_requests_count"] >= 1, ds_json
+
+                # Reload-check catches frontend-only note save (BUG-03)
+                rc_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "reload-check",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "admin",
+                    "--password",
+                    "qa-admin-password",
+                    "--url",
+                    f"{base_url}/orders/detail?id=1",
+                    "--fill",
+                    "#note-input=QA_PW_NOTE",
+                    "--submit-selector",
+                    '#note-form button[type="submit"]',
+                    "--watch-selector",
+                    "#note-display",
+                )
+                assert rc_res.returncode == 0, rc_res.stderr
+                rc_json = json.loads(rc_res.stdout)
+                assert rc_json["immediate_text"] == "QA_PW_NOTE" and rc_json["persisted"] is False, rc_json
+
+                # Authz-url catches viewer direct URL access (BUG-05)
+                az_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "authz-url",
+                    "--login-url",
+                    f"{base_url}/login",
+                    "--user",
+                    "viewer",
+                    "--password",
+                    "qa-viewer-password",
+                    "--role",
+                    "viewer",
+                    "--target-url",
+                    f"{base_url}/orders/edit?id=1",
+                )
+                assert az_res.returncode == 0, az_res.stderr
+                az_json = json.loads(az_res.stdout)
+                assert az_json["status"] == 200 and "Edit Order #1" in az_json["body_excerpt"], az_json
+
+                # Verify BUG-09 (optimistic 409 rollback), BUG-10 (deep-link ?tab=confirmed), BUG-11 (SSE + citation) with browser_probes.js
+                with sync_playwright() as p2:
+                    b2 = p2.chromium.launch(headless=True)
+                    ctx2 = b2.new_context(viewport={"width": 1440, "height": 900})
+                    ctx2.add_init_script(path=str(SCRIPTS / "browser_probes.js"))
+                    pg = ctx2.new_page()
+                    pg.goto(f"{base_url}/login", wait_until="domcontentloaded")
+                    pg.fill('input[name="username"]', "admin")
+                    pg.fill('input[name="password"]', "qa-admin-password")
+                    pg.click('button[type="submit"]')
+                    pg.wait_for_load_state("domcontentloaded")
+
+                    # BUG-09: Priority toggle stays checked on HTTP 409
+                    pg.goto(f"{base_url}/orders/detail?id=1", wait_until="domcontentloaded")
+                    pg.check("#priority-toggle")
+                    pg.wait_for_timeout(200)
+                    assert pg.is_checked("#priority-toggle") is True
+                    assert pg.locator("#priority-status").inner_text() == "Priority"
+                    drained_409 = pg.evaluate("window.__QA_DRAIN__()")
+                    assert any(f.get("status") == 409 for f in drained_409.get("networkFailures", [])), drained_409
+
+                    # BUG-10: SPA ?tab=confirmed lost on reload
+                    pg.goto(f"{base_url}/orders", wait_until="domcontentloaded")
+                    pg.click('button[data-tab="confirmed"]')
+                    assert "tab=confirmed" in pg.url
+                    pg.reload(wait_until="domcontentloaded")
+                    assert "Acme Retail" in pg.locator("#orders-tbody").inner_text()
+
+                    # BUG-11: SSE text/event-stream completes cleanly with browser_probes.js active & cites Ticket #999
+                    pg.goto(f"{base_url}/copilot", wait_until="domcontentloaded")
+                    pg.click("#copilot-ask")
+                    pg.wait_for_timeout(350)
+                    assert "Ticket #999" in pg.locator("#copilot-citations").inner_text()
+                    drained_sse = pg.evaluate("window.__QA_DRAIN__()")
+                    assert isinstance(drained_sse.get("graphqlErrors"), list)
+                    ctx2.close()
+                    b2.close()
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -677,13 +918,16 @@ def main() -> int:
             ("Orders", "Reserve Inventory shows vanishing 1.5s toast and HTTP 200 GraphQL error", "Fail", "Integration", "Medium", "GraphQL HTTP 200 errors payload with vanishing toast", ["evidence/snapshots/G-1.txt"]),
             ("Orders", "Mobile 390px horizontal overflow clips Export CSV button", "Fail", "UI/UX", "Medium", "scrollWidth > 390 clips export button", ["evidence/snapshots/G-1.txt"]),
             ("Support", "Indirect prompt injection in support ticket ignored safely", "Pass", "Permission/Security", "None", "Untrusted SYSTEM INSTRUCTION in ticket ignored without leaking cookie", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "Optimistic priority toggle stays checked after HTTP 409 conflict", "Fail", "Functional", "High", "Optimistic priority toggle failed to rollback on HTTP 409", ["evidence/snapshots/G-1.txt"]),
+            ("Orders", "SPA ?tab=confirmed deep-link filter lost on reload", "Fail", "Functional", "Medium", "URL tab=confirmed filter reverts on reload", ["evidence/snapshots/G-1.txt"]),
+            ("Copilot", "AI Copilot SSE stream emits ungrounded citation Ticket #999", "Fail", "Functional", "High", "Copilot SSE stream hallucinated ungrounded Ticket #999 citation", ["evidence/snapshots/G-1.txt"]),
         ]
         for idx, (mod, title, st, dtype, sev, actual, ev) in enumerate(gym_cases, start=1):
             payload = {
                 "module": mod,
                 "path": f"{mod} > Flow",
                 "title": title,
-                "category": "Business Rules & Calculation" if dtype == "Calculation" else ("Security & Privacy" if mod == "Support" else "UI & Content"),
+                "category": "Business Rules & Calculation" if dtype == "Calculation" else ("Security & Privacy" if mod == "Support" else ("AI-Assisted UI" if mod == "Copilot" else "UI & Content")),
                 "technique": "Scenario testing",
                 "priority": "P0",
                 "reason": "Gym check",
@@ -707,7 +951,7 @@ def main() -> int:
         score_res = run(str(ROOT / "evals" / "score_gym_run.py"), str(gym_ws), "--json")
         assert score_res.returncode == 0, score_res.stdout + score_res.stderr
         scored = json.loads(score_res.stdout)
-        assert scored["planted_bugs_matched"] == 8 and scored["trap_violations"] == [], scored
+        assert scored["planted_bugs_matched"] == 11 and scored["trap_violations"] == [], scored
 
         # Negative gym check: tripping TRAP-01 fails the grader
         record(

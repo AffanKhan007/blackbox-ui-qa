@@ -29,6 +29,7 @@ qa-<app>-<timestamp>/
 │   └── security/
 ├── calc/                                # External Python verification scripts
 ├── DEFECTS.md                           # Severity-sorted, copy-pasteable defect tickets
+├── REPORT.html                          # Self-contained interactive report with inline screenshots
 └── QA_Report_<app>_<timestamp>.xlsx
 ```
 
@@ -59,7 +60,7 @@ python "<skill-dir>/scripts/qa_record.py" <ws> update-fixture --id F-0001 --stat
 python "<skill-dir>/scripts/qa_record.py" <ws> add-defect --from-case TC-0002 --impact "Employee underpaid" --likely-cause "Cap applied to gross (hypothesis)"
 ```
 
-Supported subcommands: `set-meta`, `add-control`, `add-relationship`, `add-case`, `update-case`, `add-defect`, `update-defect`, `add-fixture`, `update-fixture`, `log-config`, `restore-config`, `add-config-matrix`, `add-question`, `update-question`, `import-guided`.
+Supported subcommands: `ingest` (one-shot multi-artifact JSON bundle with optional `auto_seed_defects: true`), `set-meta`, `add-control`, `add-relationship`, `add-case`, `update-case`, `add-defect`, `update-defect`, `add-fixture`, `update-fixture`, `log-config`, `restore-config`, `add-config-matrix`, `add-question`, `update-question`, `import-guided`.
 
 ## 3. Shared Vocabularies
 
@@ -152,7 +153,7 @@ Required: `id`, `type`, `description`. Optional: `impact`, `owner`, `status` (`O
 - **Warnings:** unconfirmed staging, incomplete `run_contract`, `time_anchor.can_freeze_time` mismatch with `capabilities`, missing `Deep`/`Exhaustive` `calc/` reference or missing cross-module relationships when multiple modules are in scope, untouched `01-app-map.md` template in `Deep`/`Exhaustive` runs, `defect.module` containing `>`, untested configured `roles`, open `Assumption`/`Conflict`, `Needs Clarification`/`Observation` without explanation.
 
 **Building deliverables:**
-- Standard report (8 sheets: `Summary`, `Test Cases`, `Defects`, `Coverage` [5 tables: By module, Module traceability, By category, Relationships, Role coverage], `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`) plus developer-ready `DEFECTS.md` (pass `--no-defects-md` to skip):
+- Standard report (8 sheets: `Summary`, `Test Cases`, `Defects`, `Coverage` [5 tables: By module, Module traceability, By category, Relationships, Role coverage], `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`), developer-ready `DEFECTS.md` (`--no-defects-md` to skip), and interactive `REPORT.html` (`--no-html-report` to skip):
   `python "<skill-dir>/scripts/build_report.py" <workspace>`
 - Draft with errors marked: pass `--allow-incomplete`. Strict CI check: `--strict`.
 - Guided execution workbook (human tester runbook): pass `--guided-sheet`, and ingest completed runs via `qa_record.py import-guided --file <xlsx>`.

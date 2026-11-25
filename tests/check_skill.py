@@ -104,6 +104,7 @@ def main() -> int:
         "install.ps1",
         "requirements.txt",
         "scripts/browser_probes.js",
+        "scripts/pw_probe.py",
         "scripts/qa_diff.py",
         "evals/gym/server.py",
         "evals/gym/ground_truth.json",

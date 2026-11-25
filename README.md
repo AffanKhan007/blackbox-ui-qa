@@ -17,9 +17,10 @@ Instead of drowning in waterfall spreadsheets or shallow "click every button" ch
 ## What's new in 2.1.0
 
 - **Deterministic Browser Telemetry & WCAG Sensor (`scripts/browser_probes.js`):** Zero-dependency, secret-redacting, SSE-safe probe capturing `console.error`, `pageerror`, `unhandledrejection`, `fetch`/XHR `>=400`, GraphQL HTTP 200 `errors`, vanishing 1–2s toasts, overflow, obscured/clipped buttons, `<24x24px` tap targets, and unlabeled controls.
-- **Developer-Ready `DEFECTS.md` & Cross-Run Diff (`scripts/qa_diff.py`):** `build_report.py` writes copy-pasteable GitHub/Jira/Linear tickets in `DEFECTS.md` (with linked test-case oracles) alongside `QA_Report_*.xlsx`, and `qa_diff.py` compares two runs for regressions and coverage deltas.
-- **Full Lifecycle CLI & Guided Round-Trip:** `qa_record.py` adds `set-meta`, `update-fixture`, `update-defect`, `update-question`, `import-guided`, and batch `--stdin`/`--file` across `restore-config` and `update-case`.
-- **Offline Adversarial QA Gym (`evals/gym/`):** Self-contained Python stdlib mini-SaaS target (`evals/gym/server.py`) with 8 planted bugs, 2 false-positive traps, and `evals/score_gym_run.py` automated grading.
+- **Developer-Ready `DEFECTS.md`, Visual `REPORT.html` & Cross-Run Diff (`scripts/qa_diff.py`):** `build_report.py` writes copy-pasteable tickets in `DEFECTS.md` and an interactive self-contained `REPORT.html` (with inline screenshot previews) alongside `QA_Report_*.xlsx`; `qa_diff.py` compares two runs for regressions and coverage deltas.
+- **Full Lifecycle CLI, One-Shot `ingest` & Optional Playwright Accelerator:** `qa_record.py` adds `ingest`, `set-meta`, `update-*`, and `import-guided`; optional [`scripts/pw_probe.py`](scripts/pw_probe.py) runs deterministic async-race, double-submit, reload, AuthZ, and multi-viewport sweeps with `browser_probes.js` injected via `addInitScript`.
+- **Offline Adversarial QA Gym (`evals/gym/`):** Self-contained Python stdlib mini-SaaS target (`evals/gym/server.py`) with 11 planted bugs (including optimistic UI `409` rollback, SPA deep-link state loss, and SSE AI streaming citation hallucination), 2 false-positive traps, and `evals/score_gym_run.py` automated grading.
+- **Journey & Persistence Coverage:** `Coverage` workbook tab now reports `Journey, invariant & multi-surface persistence` and `Coverage by technique / risk strategy` alongside module/relationship/role metrics.
 
 ## What's new in 2.0.0
 
@@ -117,7 +118,7 @@ Workbook sheets: **Summary**, **Test Cases**, **Defects**, **Coverage** (execute
 # Generate synthetic demo workspace and report
 python examples/make_demo.py
 
-# Launch offline Adversarial QA Gym (8 planted bugs + 2 false-positive traps)
+# Launch offline Adversarial QA Gym (11 planted bugs + 2 false-positive traps)
 python evals/gym/server.py --port 8765
 python evals/score_gym_run.py <workspace>
 
@@ -140,6 +141,7 @@ blackbox-ui-qa/
 │   └── 06-domain-packs.md
 ├── scripts/
 │   ├── browser_probes.js
+│   ├── pw_probe.py
 │   ├── qa_common.py
 │   ├── qa_record.py
 │   ├── init_workspace.py

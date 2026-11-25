@@ -39,6 +39,14 @@ When `capabilities.js_eval` is `true`, inject [`scripts/browser_probes.js`](../s
 - **`window.__QA_AUDIT__()`:** Returns a read-only DOM & WCAG 2.2 AA snapshot: `overflowX` (`scrollWidth > innerWidth`), `brokenImages`, `unlabeledInputs`, `unlabeledClickables`, `smallTargets` (`< 24x24px`), `obscuredOrClipped` (`elementFromPoint` / offscreen checks), and `duplicateIds`.
 - **`window.__QA_TELEMETRY__`:** Inspect full current ring buffer without draining.
 
+### Optional Playwright Probe Runner (`scripts/pw_probe.py`)
+When `playwright` is available, [`scripts/pw_probe.py`](../scripts/pw_probe.py) provides deterministic sub-second execution with automatic `addInitScript(browser_probes.js)` injection, `authorized_origins` & `staging_confirmed` safety checks, and secret redaction:
+- `sweep`: Multi-viewport (`1440x900`, `390x844`) screenshot + `__QA_DRAIN__()` + `__QA_AUDIT__()` evidence capture.
+- `race-search`: Fires back-to-back search queries (`--delay-ms 30`) to catch out-of-order async races.
+- `double-submit`: Rapid double-click submit (`no_wait_after=True`) to verify idempotency.
+- `reload-check`: Submits a mutation, hard-reloads, and verifies server persistence vs. frontend-only state loss.
+- `authz-url`: Opens a target URL in a fresh isolated `BrowserContext` signed in as a secondary role.
+
 ## 4. Guided Mode (No Browser Tool)
 
 1. State clearly that no browser driver is available and initialize with `--mode guided`.

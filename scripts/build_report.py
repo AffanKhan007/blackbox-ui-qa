@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import html
 import math
 import re
 import sys
@@ -818,7 +819,7 @@ def build_coverage(wb: Workbook, loaded: dict, stats: dict) -> None:
         row + 1,
         1,
         12,
-        "Executed Cov % = controls linked to an executed Pass/Fail case / controls inventoried.",
+        "Executed Cov % = controls linked to an executed Pass/Fail case / controls inventoried. In risk-targeted/sampled runs, Module traceability (Status = OK) is the completeness gate.",
         font=SMALL_FONT,
         border=False,
     )
@@ -862,6 +863,17 @@ def build_coverage(wb: Workbook, loaded: dict, stats: dict) -> None:
     )
     row += 3
 
+    row = section(ws, row, "Journey, invariant & multi-surface persistence", 12)
+    headers = ["Surface / Signal", "Executed Cases", "Notes"]
+    surf_counts = stats.get("surface_counts") or {}
+    surf_rows = [
+        ["Multi-surface cases (>= 2 surfaces)", stats.get("multi_surface_cases", 0), "Proves cross-surface persistence beyond immediate UI toast"]
+    ]
+    for surf, cnt in surf_counts.items():
+        surf_rows.append([f"Surface: {surf}", cnt, "Executed Pass/Fail cases checking this surface"])
+    row = write_table(ws, row, headers, surf_rows, [widths[0], widths[1], sum(widths[2:6])])
+    row += 2
+
     row = section(ws, row, "Coverage by test category", 12)
     headers = ["Category", "Cases", "Pass", "Fail", "Blocked", "Needs Clarification", "Observation", "Not Run"]
     rows = [
@@ -880,6 +892,14 @@ def build_coverage(wb: Workbook, loaded: dict, stats: dict) -> None:
     if not rows:
         rows = [["(none)", 0, 0, 0, 0, 0, 0, 0]]
     row = write_table(ws, row, headers, rows, widths[:8])
+    row += 2
+
+    row = section(ws, row, "Coverage by technique / risk strategy", 12)
+    headers = ["Technique", "Cases", "Notes"]
+    tech_rows = [[tech, cnt, ""] for tech, cnt in (stats.get("technique_counts") or {}).items()]
+    if not tech_rows:
+        tech_rows = [["(none)", 0, ""]]
+    row = write_table(ws, row, headers, tech_rows, [widths[0], widths[1], sum(widths[2:6])])
     row += 2
 
     row = section(ws, row, "Relationship coverage", 12)
@@ -1287,6 +1307,237 @@ def build_defects_markdown(loaded: dict, path: Path, *, incomplete: bool) -> Non
     tmp.replace(path)
 
 
+def build_html_report(loaded: dict, stats: dict, issues: list, path: Path, *, incomplete: bool) -> None:
+    """Write a self-contained, XSS-safe interactive REPORT.html with inline screenshot previews."""
+    meta = loaded.get("meta") or {}
+    app_name = html.escape(as_text(meta.get("app")) or "Application")
+    env_name = html.escape(as_text(meta.get("environment")) or "unknown")
+    url_text = html.escape(as_text(meta.get("url")) or "")
+    depth_text = html.escape(as_text(meta.get("depth")) or "Deep")
+    mode_text = html.escape(as_text(meta.get("execution_mode")) or "browser")
+    rec_ok = stats["reconciliation"]["ok"]
+    status_counts = stats["status_counts"]
+
+    cases_by_id = {
+        as_text(c.get("id")): c
+        for c in loaded.get("test_cases") or []
+        if isinstance(c, dict) and as_text(c.get("id"))
+    }
+    defects = sorted(
+        loaded.get("defects") or [],
+        key=lambda d: (SEVERITY_RANK.get(as_text(d.get("severity")), 9), as_text(d.get("id"))),
+    )
+    img_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+    def render_evidence_html(ev_val) -> str:
+        items = as_list(ev_val)
+        if not items:
+            return '<span class="muted">None</span>'
+        parts = []
+        for item in items:
+            raw_p = as_text(item.get("path") or item.get("file") if isinstance(item, dict) else item)
+            if not raw_p:
+                continue
+            safe_p = html.escape(raw_p, quote=True)
+            ext = Path(raw_p).suffix.lower()
+            parts.append(f'<div class="ev-item"><a href="{safe_p}" target="_blank" rel="noopener">{safe_p}</a>')
+            if ext in img_exts and not raw_p.startswith(("http://", "https://")):
+                parts.append(f'<img class="ev-thumb" src="{safe_p}" alt="{safe_p}" loading="lazy">')
+            parts.append("</div>")
+        return "".join(parts)
+
+    defect_cards = []
+    for d in defects:
+        did = html.escape(as_text(d.get("id")))
+        title = html.escape(as_text(d.get("title")))
+        sev = as_text(d.get("severity"))
+        sev_cls = html.escape(sev.lower())
+        dtype = html.escape(as_text(d.get("type")))
+        dstatus = html.escape(as_text(d.get("status")) or "Open")
+        mod = html.escape(as_text(d.get("module")))
+        area = html.escape(as_text(d.get("path")) or as_text(d.get("module")))
+        tc_ids = [as_text(x) for x in as_list(d.get("test_case_ids")) if as_text(x)]
+        oracles = [f"{tid}: {oracle_text(cases_by_id[tid].get('oracle'))}" for tid in tc_ids if tid in cases_by_id and cases_by_id[tid].get("oracle")]
+        steps_li = "".join(f"<li>{html.escape(as_text(s))}</li>" for s in as_list(d.get("steps")))
+        defect_cards.append(
+            f'<details class="card defect-card" open data-module="{mod.lower()}" data-severity="{sev_cls}">'
+            f'<summary><span class="badge sev-{sev_cls}">{html.escape(sev)}</span> '
+            f'<strong>[{did}] {title}</strong> '
+            f'<span class="muted">({mod} · {dtype} · {dstatus})</span></summary>'
+            f'<div class="card-body">'
+            f'<p><strong>Area:</strong> <code>{area}</code> | <strong>Test Cases:</strong> {html.escape(", ".join(tc_ids))}</p>'
+            + (f'<p><strong>Oracle:</strong> {html.escape(" ; ".join(oracles))}</p>' if oracles else "")
+            + f'<p><strong>Expected:</strong> {html.escape(as_text(d.get("expected")))}</p>'
+            f'<p><strong>Actual:</strong> {html.escape(as_text(d.get("actual")))}</p>'
+            + (f'<p><strong>Impact:</strong> {html.escape(as_text(d.get("impact")))}</p>' if as_text(d.get("impact")) else "")
+            + (f'<p><strong>Likely Cause:</strong> {html.escape(as_text(d.get("likely_cause")))}</p>' if as_text(d.get("likely_cause")) else "")
+            + f'<p><strong>Suggested Fix:</strong> {html.escape(as_text(d.get("suggestion")))}</p>'
+            f'<p><strong>Steps:</strong></p><ol>{steps_li}</ol>'
+            f'<div class="ev-wrap"><strong>Evidence:</strong>{render_evidence_html(d.get("evidence"))}</div>'
+            f'</div></details>'
+        )
+
+    case_rows = []
+    modules_seen = sorted({as_text(c.get("module")) for c in loaded.get("test_cases") or [] if isinstance(c, dict) and as_text(c.get("module"))})
+    for c in loaded.get("test_cases") or []:
+        if not isinstance(c, dict):
+            continue
+        cid = html.escape(as_text(c.get("id")))
+        mod = html.escape(as_text(c.get("module")))
+        path_txt = html.escape(as_text(c.get("path")))
+        title = html.escape(as_text(c.get("title")))
+        st = as_text(c.get("status"))
+        st_cls = html.escape(st.lower().replace(" ", "-"))
+        sev = as_text(c.get("severity")) or "None"
+        role = html.escape(as_text(c.get("role")))
+        surfaces = html.escape(as_text(c.get("surfaces_checked")))
+        oracle_str = html.escape(oracle_text(c.get("oracle")))
+        case_rows.append(
+            f'<tr class="case-row" data-module="{mod.lower()}" data-status="{html.escape(st.lower())}" data-severity="{html.escape(sev.lower())}">'
+            f'<td><strong>{cid}</strong></td>'
+            f'<td>{mod}<div class="muted small">{path_txt}</div></td>'
+            f'<td><strong>{title}</strong><div class="muted small">Expected: {html.escape(as_text(c.get("expected")))}<br>Actual: {html.escape(as_text(c.get("actual") or c.get("notes")))}</div></td>'
+            f'<td>{role}</td>'
+            f'<td><span class="badge st-{st_cls}">{html.escape(st)}</span></td>'
+            f'<td>{html.escape(sev)}</td>'
+            f'<td class="small">{surfaces or "-"}</td>'
+            f'<td class="small">{oracle_str or "-"}</td>'
+            f'<td>{render_evidence_html(c.get("evidence"))}</td>'
+            f'</tr>'
+        )
+
+    q_rows = "".join(
+        f'<tr><td>{html.escape(as_text(q.get("id")))}</td>'
+        f'<td>{html.escape(as_text(q.get("type")))}</td>'
+        f'<td>{html.escape(as_text(q.get("status") or "Open"))}</td>'
+        f'<td>{html.escape(as_text(q.get("description")))}</td>'
+        f'<td>{html.escape(as_text(q.get("impact")))}</td></tr>'
+        for q in loaded.get("questions") or []
+        if isinstance(q, dict)
+    )
+
+    draft_banner = '<div class="banner-draft">DRAFT — validation errors remain. Do not deliver externally until resolved.</div>' if incomplete else ""
+    mod_options = "".join(f'<option value="{html.escape(m.lower())}">{html.escape(m)}</option>' for m in modules_seen)
+    status_options = "".join(f'<option value="{html.escape(s.lower())}">{html.escape(s)}</option>' for s in STATUSES)
+
+    doc = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackbox UI QA Report — {app_name}</title>
+<style>
+  :root {{ --navy:#1F3864; --blue:#2F5597; --bg:#f5f7fb; --card:#ffffff; --border:#d9e1ec; --text:#182230; --muted:#5a6778; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.45; }}
+  header {{ background:var(--navy); color:#fff; padding:20px 28px; }}
+  header h1 {{ margin:0 0 4px; font-size:22px; }}
+  header .sub {{ color:#d9e2f3; font-size:13px; }}
+  main {{ max-width:1360px; margin:0 auto; padding:20px 24px 48px; }}
+  .banner-draft {{ background:#c00000; color:#fff; padding:10px 16px; border-radius:6px; font-weight:700; margin-bottom:16px; }}
+  .kpis {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:12px; margin-bottom:20px; }}
+  .kpi {{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }}
+  .kpi .lbl {{ font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }}
+  .kpi .val {{ font-size:22px; font-weight:700; color:var(--navy); margin-top:4px; }}
+  .filters {{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:20px; }}
+  .filters input, .filters select {{ padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; }}
+  h2 {{ color:var(--navy); margin:24px 0 12px; font-size:18px; border-bottom:2px solid var(--border); padding-bottom:6px; }}
+  .card {{ background:var(--card); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; padding:12px 16px; }}
+  .card summary {{ cursor:pointer; font-size:15px; }}
+  .card-body {{ margin-top:10px; padding-top:10px; border-top:1px solid var(--border); font-size:14px; }}
+  .badge {{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }}
+  .sev-critical {{ background:#c00000; color:#fff; }}
+  .sev-high {{ background:#ffc7ce; color:#9c0006; }}
+  .sev-medium {{ background:#ffeb9c; color:#9c6500; }}
+  .sev-low {{ background:#ddebf7; color:#1f4e79; }}
+  .st-pass {{ background:#c6efce; color:#006100; }}
+  .st-fail {{ background:#ffc7ce; color:#9c0006; }}
+  .st-blocked {{ background:#d9d9d9; color:#404040; }}
+  .st-needs-clarification {{ background:#ffeb9c; color:#9c6500; }}
+  .st-observation {{ background:#ddebf7; color:#1f4e79; }}
+  .st-not-run {{ background:#ededed; color:#595959; }}
+  .table-wrap {{ overflow-x:auto; background:var(--card); border:1px solid var(--border); border-radius:8px; }}
+  table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+  th {{ background:var(--navy); color:#fff; text-align:left; padding:10px; position:sticky; top:0; }}
+  td {{ border-top:1px solid var(--border); padding:9px 10px; vertical-align:top; }}
+  tr:nth-child(even) td {{ background:#f9fbfe; }}
+  .ev-thumb {{ display:block; max-width:220px; max-height:130px; margin-top:4px; border:1px solid var(--border); border-radius:4px; }}
+  .ev-item {{ margin-bottom:4px; }}
+  .muted {{ color:var(--muted); }}
+  .small {{ font-size:12px; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>Blackbox UI QA Report — {app_name}</h1>
+  <div class="sub">{env_name} | {url_text} | Depth: {depth_text} | Mode: {mode_text} | Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+</header>
+<main>
+  {draft_banner}
+  <section class="kpis">
+    <div class="kpi"><div class="lbl">Test Cases</div><div class="val">{stats['cases_total']}</div></div>
+    <div class="kpi"><div class="lbl">Pass / Fail</div><div class="val">{status_counts.get('Pass', 0)} / {status_counts.get('Fail', 0)}</div></div>
+    <div class="kpi"><div class="lbl">Pass Rate</div><div class="val">{stats['pass_rate']:.1f}%</div></div>
+    <div class="kpi"><div class="lbl">Defects</div><div class="val">{len(defects)}</div></div>
+    <div class="kpi"><div class="lbl">Reconciliation</div><div class="val">{'OK' if rec_ok else 'CHECK'}</div></div>
+    <div class="kpi"><div class="lbl">Open Questions</div><div class="val">{stats['open_questions_count']}</div></div>
+  </section>
+
+  <div class="filters">
+    <input id="q-search" type="search" placeholder="Search title, module, expected/actual...">
+    <select id="q-module"><option value="">All modules</option>{mod_options}</select>
+    <select id="q-status"><option value="">All statuses</option>{status_options}</select>
+    <select id="q-sev"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+  </div>
+
+  <h2>Confirmed Defects ({len(defects)})</h2>
+  <section id="defects-list">{''.join(defect_cards) or '<p class="muted">No confirmed defects recorded.</p>'}</section>
+
+  <h2>Test Cases ({stats['cases_total']})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>Module / Path</th><th>Title &amp; Outcome</th><th>Role</th><th>Status</th><th>Severity</th><th>Surfaces</th><th>Oracle</th><th>Evidence</th></tr></thead>
+      <tbody>{''.join(case_rows)}</tbody>
+    </table>
+  </div>
+
+  <h2>Open Questions &amp; Limitations ({len(loaded.get('questions') or [])})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Description</th><th>Impact</th></tr></thead>
+      <tbody>{q_rows or '<tr><td colspan="5" class="muted">None recorded.</td></tr>'}</tbody>
+    </table>
+  </div>
+</main>
+<script>
+  const search = document.getElementById('q-search');
+  const modSel = document.getElementById('q-module');
+  const stSel = document.getElementById('q-status');
+  const sevSel = document.getElementById('q-sev');
+  function applyFilters() {{
+    const q = (search.value || '').trim().toLowerCase();
+    const mod = modSel.value;
+    const st = stSel.value;
+    const sev = sevSel.value;
+    for (const el of document.querySelectorAll('.defect-card')) {{
+      const ok = (!mod || el.dataset.module === mod) && (!sev || el.dataset.severity === sev) && (!q || el.textContent.toLowerCase().includes(q));
+      el.style.display = ok ? '' : 'none';
+    }}
+    for (const el of document.querySelectorAll('.case-row')) {{
+      const ok = (!mod || el.dataset.module === mod) && (!st || el.dataset.status === st) && (!sev || el.dataset.severity === sev) && (!q || el.textContent.toLowerCase().includes(q));
+      el.style.display = ok ? '' : 'none';
+    }}
+  }}
+  [search, modSel, stSel, sevSel].forEach(el => el.addEventListener('input', applyFilters));
+</script>
+</body>
+</html>
+"""
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(doc, encoding="utf-8")
+    tmp.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1311,6 +1562,7 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     parser.add_argument("--no-secret-scan", action="store_true", help="Skip the credential scan")
     parser.add_argument("--no-defects-md", action="store_true", help="Skip generating DEFECTS.md beside the workbook")
+    parser.add_argument("--no-html-report", action="store_true", help="Skip generating REPORT.html beside the workbook")
     args = parser.parse_args()
 
     workspace = Path(args.workspace).expanduser().resolve()
@@ -1411,6 +1663,10 @@ def main() -> int:
         defects_md = output.parent / "DEFECTS.md"
         build_defects_markdown(loaded, defects_md, incomplete=bool(errors))
         print(f"Defects written: {defects_md}")
+    if not args.no_html_report:
+        html_report = output.parent / "REPORT.html"
+        build_html_report(loaded, stats, issues, html_report, incomplete=bool(errors))
+        print(f"HTML report written: {html_report}")
     print(
         f"Cases: {stats['cases_total']} | "
         f"Pass: {stats['status_counts'].get('Pass', 0)} | "
