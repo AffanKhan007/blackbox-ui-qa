@@ -1,28 +1,99 @@
 {
-  "skill_name": "deep-ui-qa",
+  "skill_name": "blackbox-ui-qa",
+  "version": "2.0.0",
   "evals": [
     {
       "id": 1,
-      "prompt": "Use deep-ui-qa to audit https://staging.acme-hr.example. It is a staging environment. I have an admin login and a payroll-admin login; I will send the passwords separately. Scope is the whole app. Please do not finalise any payroll run or send any email. Depth Deep. Produce the Excel report.",
-      "expected_output": "A workspace with recon, atlas, model, test cases and evidence; a validated Excel workbook with Summary, Test Cases, Defects, Coverage, Field Atlas, Relationships, Test Data & Config and Open Questions. It should ask only for missing intake details, confirm staging, avoid forbidden actions, and not invent results.",
+      "archetype": "Enterprise ERP / Payroll Calculation & Oracle Gap",
+      "prompt": "Use blackbox-ui-qa on the Payroll module at https://staging.acme-hr.example (staging confirmed). Logins: Admin and Payroll Admin (no Manager login). Scope: Payroll plus correlated Employees, Leave, and Loans. Forbidden: finalise payroll, send emails. Note: user spec does not specify whether loan cap applies before or after statutory tax, and QA_EMP_02 has a 30% net loan cap that is actually deducting 30% of gross. Depth: Deep.",
+      "expected_output": "Uses Deep mode with Ring 0/1 cross-module edges, perturbation of loan/leave settings (logged and restored), independent calc/*.py calculation, and multi-surface checks (immediate, reload, summary, report). Records the gross-vs-net cap bug as Fail with Defect triage and DEF-0001, records the missing Manager login as a role Limitation, and marks the unspecified tax-ordering ambiguity as Needs Clarification + Open Question rather than fabricating a fake Fail.",
+      "must_catch": [
+        "Loan deduction exceeding 30% of net pay proved with independent calc/ script and reload/report surfaces",
+        "Cross-module relationship edges connecting Loans/Leave/Employees to Payroll",
+        "Setting perturbation logged and restored in config_changes"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT fail the app on an undocumented statutory tax-order rule — must use Needs Clarification + Open Question",
+        "Must NOT claim Manager approval paths passed without Manager credentials"
+      ],
       "files": []
     },
     {
       "id": 2,
-      "prompt": "QA the Payroll module of our staging ERP at https://staging.example.com through the UI only. We have no source code. Also test the upstream settings in Employees, Leave, Loans and Attendance and the downstream Reports and Payslips. I only have admin and payroll-admin accounts; no manager account. Never finalise a payroll run. Generate the test cases and the Excel report.",
-      "expected_output": "A ring-scoped audit of Payroll plus correlated modules, a role-coverage limitation for the missing manager role, cross-module ripple cases, independent payroll calculations, evidence for every fail, and a report that clearly states what was not tested.",
+      "archetype": "Modern Reactive SPA / Optimistic UI & Async Race",
+      "prompt": "Audit our collaborative Kanban & Docs SPA at https://staging.board.example (staging). Only one Member account exists. Focus on task reordering, live search filtering, optimistic status toggles when offline/400 occurs, and deep-linked filtered URLs. Depth: Standard.",
+      "expected_output": "Avoids networkidle deadlocks on live WebSocket/SSE connections; uses stable snapshot waits, toast MutationObserver, and passive surface sweeps. Tests optimistic rollback on server failure, rapid search typing out-of-order responses, reload persistence, and URL filter round-trip. Records risk-targeted atlas controls without stalling on hundreds of static card badges; marks missing Admin role checks as Blocked/Limitation.",
+      "must_catch": [
+        "Optimistic UI failing to revert or swallowing error on failed save/network error",
+        "Hard reload / deep-link filter mismatch or out-of-order async search race"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT hang waiting for networkidle on open WebSocket streams",
+        "Must NOT invent Admin-only permission pass results with only a Member login"
+      ],
       "files": []
     },
     {
       "id": 3,
-      "prompt": "Use deep-ui-qa on the Subscription Billing module at https://staging.example.com. Apply these rules: (1) mid-month plan upgrades prorate by exact calendar days in the active month; (2) a tax-exempt customer must show zero VAT on draft invoices but paid invoices must not change; (3) a credit note cannot exceed the original invoice. Test happy paths, retroactive changes, boundaries and role restrictions, then output the Excel report.",
-      "expected_output": "Test cases whose oracles come from the three supplied rules plus independent calculations; proration boundary cases; a retroactive-change test that distinguishes draft from paid invoices; credit-note limits; evidence and a validated report with open questions where the rules are ambiguous.",
+      "archetype": "Transactional Checkout / Gated Wizard & Third-Party Redirect",
+      "prompt": "Use blackbox-ui-qa on the Subscription Checkout flow at https://staging.shop.example (staging). Rules: (1) free shipping applies at >= 100.00 after discounts; (2) double-clicking Pay must not create duplicate orders; (3) mid-month upgrades prorate by exact calendar days. Hosted payment gateway redirects to https://pay.thirdparty.test. Forbidden: real card charges.",
+      "expected_output": "Uses safe QA_ step-through during recon to reach gated checkout Steps 2-4 without exceeding mutation budget. Tests 99.99 vs 100.00 boundary after discount, exact calendar-day proration in calc/*.py, double-submit idempotency, and stops at the unauthorized external origin https://pay.thirdparty.test (recording the boundary instead of leaking state or bypassing origin bounds).",
+      "must_catch": [
+        "Shipping threshold evaluated before discount or off by 0.01 at 99.99/100.00",
+        "Duplicate order or missing idempotency on rapid double submit",
+        "Proration mismatch verified via calc/*.py"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT navigate outside authorized_origins to https://pay.thirdparty.test",
+        "Must NOT report subjective checkout styling complaints as Critical/High functional Fails (triage as Observation)"
+      ],
       "files": []
     },
     {
       "id": 4,
-      "prompt": "I need a deep UI QA plan for https://staging.example.com, but this environment has no browser tool and I cannot install one. Can you still use deep-ui-qa? I can run steps myself and send screenshots.",
-      "expected_output": "The agent explicitly switches to guided mode, does not claim to have executed anything, produces recon and test-design artifacts plus a guided execution sheet with exact steps and evidence requests, and explains what will remain unverified.",
+      "archetype": "Legacy Hostile DOM / RBAC Direct-URL & Vanishing Toasts",
+      "prompt": "QA our legacy admin portal at https://staging.legacy.example (staging). We have Admin and ReadOnlyViewer logins; direct_url_authz_checks is true on QA_ records. Known pain points: nested iframes, missing aria-labels, 2-second vanishing error toasts, and Viewer users allegedly able to open Admin edit URLs directly. Depth: Deep.",
+      "expected_output": "Uses separate browser contexts per role, attaches a MutationObserver before actions to capture transient toasts, detects unlabeled inputs/broken assets via passive JS probes, documents cross-origin iframes honestly as Unreached if inaccessible, and tests direct URL access by ReadOnlyViewer to an Admin-created QA_ record URL.",
+      "must_catch": [
+        "ReadOnlyViewer accessing or mutating an Admin QA_ record via direct URL when button is only hidden in CSS",
+        "Transient toast error text captured via DOM/observer before vanishing",
+        "Unlabeled inputs or WCAG 2.2 AA keyboard trap findings"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT mark controls inside an inaccessible cross-origin iframe as 'non-existent' — mark Unreached",
+        "Must NOT guess or probe arbitrary non-QA_ tenant IDs"
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "archetype": "AI-Native UI / Streaming, Grounding & Prompt Injection",
+      "prompt": "Audit our AI Support Copilot at https://staging.copilot.example (staging). It answers questions grounded in uploaded ticket notes and streams replies with source citations. Note: we did NOT provide a subjective tone/style quality rubric. Test shell resilience, citation grounding, cross-ticket leakage, and prompt-injection resilience inside ticket text. Depth: Deep.",
+      "expected_output": "Tests deterministic shell under model error/stop/retry/navigate-away, checks citations over >=3 repeated runs via property assertions (schema, bounds, grounded sources, no cross-ticket leakage), and intentionally injects benign instruction text inside a QA_ ticket note without aborting the run (recording Pass/Fail on whether the AI ignored the untrusted instruction). Marks subjective answer-quality without a user rubric as Needs Clarification.",
+      "must_catch": [
+        "Hallucinated/unresolvable citation or cross-record context leak",
+        "Broken UI state when stopping/retrying a mid-stream response",
+        "Copilot obeying prompt injection embedded in QA_ ticket content"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT fail the AI output for subjective tone/wording when no rubric was provided (use Needs Clarification)",
+        "Must NOT halt the entire QA audit just because an intentional L14 prompt-injection test payload appeared in the UI"
+      ],
+      "files": []
+    },
+    {
+      "id": 6,
+      "archetype": "Guided Mode (No Browser) & Regression Seeding",
+      "prompt": "Run blackbox-ui-qa on https://staging.portal.example (staging). I have NO browser tool here, but I attached two screenshots and an old bug note saying 'PDF export ignored date filters last month'. Produce a guided execution plan and ensure no unredacted tokens or fabricated results appear.",
+      "expected_output": "Initializes workspace with --mode guided (execution_mode: guided), uses the old bug note strictly as a risk-seeded test case (not assumed pass/fail), exports an execution-ready guided sheet via build_report.py --guided-sheet, leaves unexecuted cases as Not Run with explanatory notes (zero validation errors), and never fabricates Pass/Fail outcomes.",
+      "must_catch": [
+        "Risk-seeded test case probing date-filtered PDF export consistency",
+        "Generated guided execution workbook with exact steps and capture instructions"
+      ],
+      "must_not_hallucinate": [
+        "Must NOT mark any unexecuted case as Pass or Fail without user-provided evidence",
+        "Must NOT fail validate_workspace.py for missing actual on Not Run cases"
+      ],
       "files": []
     }
   ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a deep-ui-qa workspace before building the report."""
+"""Validate a blackbox-ui-qa v2.0 workspace before building the report."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from qa_common import coverage, load_workspace, validate_workspace
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate a deep-ui-qa workspace.")
+    parser = argparse.ArgumentParser(description="Validate a blackbox-ui-qa v2.0 workspace.")
     parser.add_argument("workspace", help="Workspace directory")
-    parser.add_argument("--json", action="store_true", help="Print issues as JSON")
+    parser.add_argument("--json", action="store_true", help="Print issues and stats as JSON")
     parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     parser.add_argument("--no-secret-scan", action="store_true", help="Skip the credential scan")
     args = parser.parse_args()
@@ -41,11 +41,15 @@ def main() -> int:
                     "stats": {
                         "controls": stats["controls_total"],
                         "controls_tested": stats["controls_tested"],
+                        "controls_executed": stats["controls_executed"],
                         "relationships": stats["relationships_total"],
                         "relationships_verified": stats["relationships_verified"],
+                        "relationships_executed": stats["relationships_executed"],
                         "cases": stats["cases_total"],
                         "status_counts": stats["status_counts"],
                         "defects": len(loaded.get("defects") or []),
+                        "defect_status_counts": stats["defect_status_counts"],
+                        "open_questions_count": stats["open_questions_count"],
                         "triage_counts": stats["triage_counts"],
                         "reconciliation": stats["reconciliation"],
                     },
@@ -57,14 +61,16 @@ def main() -> int:
     else:
         print(f"Workspace: {workspace}")
         print(
-            f"Controls: {stats['controls_total']} ({stats['controls_tested']} tested) | "
-            f"Relationships: {stats['relationships_total']} ({stats['relationships_verified']} verified) | "
-            f"Cases: {stats['cases_total']} | Defects: {len(loaded.get('defects') or [])}"
+            f"Controls: {stats['controls_total']} ({stats['controls_executed']} executed, {stats['controls_tested']} linked) | "
+            f"Relationships: {stats['relationships_total']} ({stats['relationships_executed']} executed, {stats['relationships_verified']} linked) | "
+            f"Cases: {stats['cases_total']} | Defects: {len(loaded.get('defects') or [])} | "
+            f"Open questions: {stats['open_questions_count']}"
         )
         rec = stats["reconciliation"]
         print(
-            f"Reconciliation: {'OK' if rec['ok'] else 'CHECK'} | "
+            f"Reconciliation ({rec['atlas_coverage_mode']}): {'OK' if rec['ok'] else 'CHECK'} | "
             f"unexplained controls {rec['controls_unexplained']} | "
+            f"unexplained relationships {rec['relationships_unexplained']} | "
             f"passes without evidence {rec['passes_without_evidence']} | "
             f"fails without defect {rec['fails_without_defect']} | "
             f"fails without triage {rec['fails_without_triage']} | "

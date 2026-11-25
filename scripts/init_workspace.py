@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a deep-ui-qa workspace with the required artifacts and folders."""
+"""Create a blackbox-ui-qa v2.0 workspace with required artifacts and folders."""
 
 from __future__ import annotations
 
@@ -11,121 +11,60 @@ from pathlib import Path
 
 from qa_common import SCHEMA_VERSION, now_iso, slugify
 
+SCOPE_TEMPLATE = """# QA scope & domain rules
 
-SCOPE_TEMPLATE = """# QA scope
-
-## Engagement
-
-- **App:** {app}
-- **URL:** {url}
-- **Environment:** {environment}
-- **Module / scope:** {scope}
-- **Depth:** {depth}
-- **Started:** {started}
+Workspace metadata and the run contract live in `meta.json`. Keep this file strictly for user-provided rules, business context, and raw scope notes so nothing is duplicated.
 
 ## Objective
 
-<!-- One or two sentences: what decision will this QA run support? -->
+<!-- 1–2 sentences: what decision will this QA run support? -->
 
-## In scope
+## Rules & specifications provided by the user
 
-<!-- Modules, roles, workflows, outputs. -->
+<!-- Claims to verify against the live app, never assumed proof. -->
 
-## Out of scope
+## Notes & domain context
 
-<!-- Explicit exclusions, with the reason. -->
-
-## Run contract
-
-- **Authorized origins:** <!-- Only these origins may be visited. -->
-- **Allowed actions:** <!-- read-only recon, create/edit/delete QA_ records, ... -->
-- **Mutation budget:** <!-- e.g. 50 created records, 20 config changes. -->
-- **Data classification:** <!-- e.g. synthetic test data only. -->
-- **Evidence retention:** <!-- Who keeps the workspace, and for how long. -->
-- **Time anchor:** <!-- clock; user timezone; tenant timezone; can the host freeze time? -->
-- **End state:** <!-- Fixtures removed or archived; config restored; side effects accounted for. -->
-
-## Roles and access
-
-| Role | Access confirmed | Notes |
-|---|---|---|
-|  |  |  |
-
-## Rules and specifications provided by the user
-
-<!-- Paste only rules/specs the user explicitly handed you. These are claims to verify, not proof the app is right. -->
-
-## Forbidden actions
-
-<!-- e.g. never finalise payroll, never send email, never delete shared records. -->
-
-## Side effects to watch
-
-<!-- Email, SMS, webhooks, payments, invitations, provisioning. -->
-
-## Time limit and constraints
-
-<!-- Deadline, maintenance window, data restrictions. -->
-
-## Assumptions
-
-<!-- Decisions made to keep moving; each will appear in the report. -->
-
-## Open questions
-
-<!-- Questions for the user; also add them to 08-open-questions.json. -->
+<!-- Environment caveats, regulatory region/year, prior incident pointers to probe. -->
 """
 
-PROGRESS_TEMPLATE = """# Progress ledger
+PROGRESS_TEMPLATE = """# Execution checkpoint
 
-Phase: 0 — Intake
+Stage: 1 — Rapid Map & Surface Sweep
 Modules complete: none
 Modules in progress: none
 Open blockers: none
+Next action: Complete intake in meta.json, verify login, and map navigation tree in 01-app-map.md.
 Last updated: {started}
 
-## Phase checkpoints
+## Stage checkpoints
 
-| Phase | Status | Notes |
+| Stage | Status | Notes |
 |---|---|---|
-| 0 Intake | in progress |  |
-| 1 Recon | todo |  |
-| 2 Atlas | todo |  |
-| 3 Model | todo |  |
-| 4 Design | todo |  |
-| 5 Execute | todo |  |
-| 6 Second look | todo |  |
-| 7 Report | todo |  |
-| 8 Cleanup | todo |  |
-
-## State ledger
-
-| State ID | Path | Role | Signature | Status (todo/visited/unreached) | Atlas rows added | Notes |
-|---|---|---|---|---|---|---|
+| 1. Rapid Map & Surface Sweep | in progress |  |
+| 2. Deep Model & Risk Execution | todo |  |
+| 3. Second-Look Charters, Report & Cleanup | todo |  |
 """
 
-APP_MAP_TEMPLATE = """# App map
+APP_MAP_TEMPLATE = """# App map & state ledger
 
-A state is anything that changes what the user sees, including tabs, nested tabs, pills, accordions, modals, drawers, wizards and row actions.
+A state is anything that alters visible UI or interaction rules: route, active tab/subtab, open modal/drawer, selection toolbar, role, or canvas mode.
 
-Signature format: `URL | active tab path | open overlay | role | hash of visible control labels`.
+Signature format: `URL | active tab/mode | open overlay | role | selection/label hash`.
 
 ## Navigation tree
-
-<!-- Indent by depth. Use the same path format as the atlas and test cases. -->
 
 ```
 App
 ├── Module
-│   ├── Tab
-│   │   └── Sub-tab
-│   └── ...
+│   ├── Tab / View
+│   │   └── Sub-tab / Overlay
 └── ...
 ```
 
 ## States
 
-| State ID | Path | Role | Signature | Status | Atlas rows | Notes |
+| State ID | Path | Role | Signature | Status (todo/visited/unreached) | Console/Net Errors | Notes |
 |---|---|---|---|---|---|---|
 | S-001 |  |  |  | todo |  |  |
 
@@ -135,68 +74,65 @@ App
 |---|---|---|
 |  |  |  |
 
-## Completeness checks
+## Discovery sweeps
 
-- [ ] Menu reconciliation
-- [ ] Search sweep
-- [ ] Link sweep
-- [ ] Role sweep
-- [ ] Cross-reference sweep
-- [ ] Count sanity
+- [ ] Menu, top-bar, user-menu & command-palette reconciliation
+- [ ] Role menu diff (across all provided roles)
+- [ ] Passive surface sweep (console errors, HTTP >=400, broken images, overflow)
 """
 
-RULES_TEMPLATE = """# Business rules
+RULES_TEMPLATE = """# Business rules & state machines
 
-One rule per line. Use IF/THEN. Record the source and confidence.
-
-```
-RULE-001  IF <condition> THEN <expected behaviour>   [source: <in-app text / user spec / observation / domain convention / hypothesis>]
-```
+One rule per line as IF/THEN with source and confidence. Record entity state machines below.
 
 ## Rules
 
-| ID | Rule | Source | Confidence | Probed by | Notes |
+| ID | Rule (IF ... THEN ...) | Source | Confidence | Probed by | Notes |
 |---|---|---|---|---|---|
 | RULE-001 |  |  |  |  |  |
 
-## Conflicts between oracles
+## Entity state machines
 
-| Rule(s) | Conflict | Question for the user |
+```
+Entity: Draft -> Submitted -> Approved -> Locked (expected illegal: Approved -> Edit)
+```
+
+## Oracle conflicts
+
+| Rule(s) | Conflict | Question for user (mirror in 08-open-questions.json) |
 |---|---|---|
 |  |  |  |
 """
 
-SCENARIOS_TEMPLATE = """# Scenario cards
+SCENARIOS_TEMPLATE = """# Cross-module scenarios & charters
 
-Scenarios combine modules and put the product in an uncomfortable position. Each needs an independent oracle.
+High-yield scenarios combine ≥2 modules, push boundaries/reversals/races, and define an end state.
 
 ```
 SC-001  "<short name>"
-  Entities:
-  Config:
-  Path:
-  Oracle:
-  Risk:
-  Touches:
-  Expected:
-  End state:
+  Entities:  QA_... (stacked / isolate / control)
+  Config:    <settings active>
+  Path:      <steps across modules>
+  Oracle:    <calc/ script or rule>
+  Expected:  <parallel expected outcome>
+  End state: <record state, downstream totals, cleanup state>
 ```
 
-## Scenarios
+## Scenarios & gap-hunt charters
 
-| ID | Name | Modules touched | Oracle | Risk | Status |
-|---|---|---|---|---|---|
-| SC-001 |  |  |  |  |  |
+| ID / Charter | Scope / Lens | Risk | Oracle | Status |
+|---|---|---|---|---|
+| SC-001 |  |  |  | todo |
 """
 
 CALC_README = """# Independent calculations
 
-Every calculation test needs an expected value computed outside the app.
+Every calculation test in Deep/Exhaustive runs needs an expected value computed outside the app.
 
-- One script per scenario or test case: `TC-0031.py`, `SC-021.py`.
-- Print the inputs, the formula, and the result with the same precision the UI uses.
-- Save the output next to the script (`.txt` or `.json`) and reference it in the test case evidence.
-- Do not import the app's code or call its API to compute the expected value.
+- One script per scenario or case: `calc/TC-0031.py`, `calc/SC-021.py`.
+- Print inputs, formula, rounding mode, and expected result with exact UI precision.
+- Reference the script or its `.txt`/`.json` output in `evidence` and `oracle.source`.
+- Never import app code or call app APIs to derive expected results.
 """
 
 
@@ -209,15 +145,27 @@ def write_json(path: Path, data: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create a deep-ui-qa workspace.")
+    parser = argparse.ArgumentParser(description="Create a blackbox-ui-qa v2.0 workspace.")
     parser.add_argument("--app", required=True, help="Application name")
     parser.add_argument("--url", default="", help="Application URL")
-    parser.add_argument("--module", default="", help="Module or scope (optional)")
+    parser.add_argument("--module", action="append", default=[], help="In-scope module (repeatable)")
     parser.add_argument(
         "--depth",
         default="deep",
         choices=["quick", "standard", "deep", "exhaustive"],
         help="QA depth (default: deep)",
+    )
+    parser.add_argument(
+        "--mode",
+        default="browser",
+        choices=["browser", "guided"],
+        help="Execution mode (default: browser)",
+    )
+    parser.add_argument(
+        "--atlas-mode",
+        default="",
+        choices=["", "sampled", "risk-targeted", "full"],
+        help="Override atlas coverage mode",
     )
     parser.add_argument("--workspace", default="", help="Workspace path (default: qa-<app>-<timestamp>)")
     parser.add_argument("--force", action="store_true", help="Write into an existing non-empty workspace")
@@ -236,10 +184,24 @@ def main() -> int:
         return 1
 
     workspace.mkdir(parents=True, exist_ok=True)
-    for folder in ["evidence/screenshots", "evidence/snapshots", "evidence/network", "evidence/console", "evidence/outputs", "evidence/security", "calc"]:
+    for folder in (
+        "evidence/screenshots",
+        "evidence/snapshots",
+        "evidence/network",
+        "evidence/console",
+        "evidence/outputs",
+        "evidence/security",
+        "calc",
+    ):
         (workspace / folder).mkdir(parents=True, exist_ok=True)
 
-    scope = args.module or "Whole application"
+    modules = [m.strip() for m in args.module if m.strip()]
+    depth_cap = args.depth.capitalize()
+    atlas_mode = args.atlas_mode or (
+        "sampled" if args.depth == "quick" else ("full" if args.depth == "exhaustive" else "risk-targeted")
+    )
+    scope = ", ".join(modules) if modules else "Whole application"
+
     meta = {
         "schema_version": SCHEMA_VERSION,
         "app": args.app,
@@ -248,24 +210,34 @@ def main() -> int:
         "staging_confirmed": False,
         "version": "",
         "scope": scope,
-        "depth": args.depth.capitalize(),
-        "module": args.module,
-        "in_scope_modules": [args.module] if args.module else [],
+        "in_scope_modules": modules,
+        "depth": depth_cap,
+        "execution_mode": args.mode,
+        "atlas_coverage_mode": atlas_mode,
         "roles": [],
         "host": "",
-        "browser_tool": "",
-        "capabilities": {},
+        "browser_tool": "none" if args.mode == "guided" else "",
+        "capabilities": {
+            "dom_snapshot": False,
+            "screenshot": False,
+            "console": False,
+            "network": False,
+            "js_eval": False,
+            "multiple_contexts": False,
+            "downloads": False,
+            "iframes": False,
+            "can_freeze_time": False,
+        },
         "viewports": ["1440x900", "390x844"],
         "locale": "",
-        "timezone": "",
         "started_at": started,
         "finished_at": "",
-        "forbidden_actions": [],
         "limitations": [],
         "run_contract": {
             "authorized_origins": [args.url] if args.url else [],
             "allowed_actions": ["read-only recon"],
             "forbidden_actions": [],
+            "direct_url_authz_checks": True,
             "mutation_budget": "",
             "data_classification": "synthetic test data only",
             "evidence_retention": "retain workspace until handoff",
@@ -277,20 +249,9 @@ def main() -> int:
             },
             "end_state": "All QA_ fixtures deleted or archived; config restored; no outbound messages.",
         },
-        "workspace_version": SCHEMA_VERSION,
     }
     write_json(workspace / "meta.json", meta)
-    write_text(
-        workspace / "00-scope.md",
-        SCOPE_TEMPLATE.format(
-            app=args.app,
-            url=args.url or "(not provided)",
-            environment="staging (to be confirmed)",
-            scope=scope,
-            depth=args.depth.capitalize(),
-            started=started,
-        ),
-    )
+    write_text(workspace / "00-scope.md", SCOPE_TEMPLATE)
     write_text(workspace / "00-progress.md", PROGRESS_TEMPLATE.format(started=started))
     write_text(workspace / "01-app-map.md", APP_MAP_TEMPLATE)
     write_json(workspace / "02-field-atlas.json", {"controls": []})
@@ -307,7 +268,7 @@ def main() -> int:
     write_text(workspace / "calc" / "README.md", CALC_README)
 
     print(f"Workspace created: {workspace}")
-    print("Next: fill 00-scope.md and meta.json, then start Phase 1 recon.")
+    print("Next: confirm staging & run_contract in meta.json, then start Stage 1.")
     return 0
 
 

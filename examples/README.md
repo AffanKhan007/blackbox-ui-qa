@@ -1,37 +1,24 @@
 # Demo assets
 
-A small, entirely synthetic run that shows what `deep-ui-qa` produces. No login, network access, real company, real person or real financial data is involved.
+A synthetic `blackbox-ui-qa` v2.0 run showing how `qa_record.py`, `validate_workspace.py`, and `build_report.py` work end-to-end with fake data (no login, network access, or PII).
 
 ## Generate it
-
-From the repository root:
 
 ```bash
 python examples/make_demo.py
 ```
 
-This writes:
+Writes `examples/demo-workspace/` and `examples/demo_report.xlsx`. Re-running safely refreshes only the demo folder.
 
-- `examples/demo-workspace/` — the workspace artifacts and text evidence
-- `examples/demo_report.xlsx` — the generated Excel report
-
-The pre-generated workbook is committed so you can open it without running anything. Re-running the script safely replaces the demo folder only; it refuses to overwrite a folder that is not the demo.
-
-## What to look at
+## What is inside
 
 | Sheet | Demo highlight |
 |---|---|
-| **Summary** | Run contract, reconciliation rows marked `OK`, anomaly triage counts, limitations |
-| **Test Cases** | Oracle families, `Pass`/`Fail`/`Blocked`/`Observation`, triage disposition and reason |
-| **Defects** | One linked defect with reproduction, impact and suggestion |
-| **Coverage** | Module traceability showing no unexplained gaps |
-| **Field Atlas** | Controls with tested-by links or a stated reason not tested |
-| **Relationships** | A verified edge and an edge with an explicit reason |
-| **Test Data & Config** | Isolate fixture design, restored config change, configuration matrix |
-| **Open Questions** | An open question and a limitation |
-
-The demo deliberately includes one defect, one blocked case and one observation so the status vocabulary is visible in the workbook.
-
-## Adapting it
-
-Copy `make_demo.py`, change the synthetic records in `populate()`, and rerun. Keep the data fake; never put credentials or personal data into a demo workspace.
+| **Summary** | Run contract, defect status & severity breakdowns, executed coverage, open-question counts, reconciliation (`OK`), charts |
+| **Test Cases** | `Pass`, `Fail`, `Blocked`, `Observation`, `Surfaces Checked`, triage dispositions, `calc/` references |
+| **Defects** | Linked defect seeded from `TC-0002` via `qa_record.py add-defect --from-case` |
+| **Coverage** | Executed vs. linked coverage, module traceability, category/relationship/role coverage |
+| **Field Atlas** | Risk-targeted controls |
+| **Relationships** | Verified cross-module edges |
+| **Test Data & Config** | Isolate fixture, restored config change, `configuration_matrix` |
+| **Open Questions** | Open product question and role limitation |

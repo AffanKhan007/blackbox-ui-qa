@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Install the deep-ui-qa Agent Skill for a supported host.
+# Install the blackbox-ui-qa Agent Skill for supported hosts.
 set -euo pipefail
 
-SKILL_NAME="deep-ui-qa"
+SKILL_NAME="blackbox-ui-qa"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCOPE="global"
 HOST="universal"
+ALL_HOSTS=(universal claude opencode codex cursor windsurf gemini copilot)
 
 usage() {
   cat <<'EOF'
-Install deep-ui-qa.
+Install blackbox-ui-qa.
 
 Usage:
   ./install.sh [--global | --project] [--host <host>]
@@ -23,7 +24,7 @@ Hosts:
   windsurf   .windsurf/skills or ~/.codeium/windsurf/skills
   gemini     .gemini/skills
   copilot    .github/skills or ~/.copilot/skills
-  all        install to universal, claude, opencode, codex and cursor
+  all        install to all 8 supported hosts
 
 Examples:
   ./install.sh --global
@@ -99,20 +100,17 @@ install_one() {
     echo "Unknown host: $host" >&2
     return 1
   }
+  rm -rf "$dest/references" "$dest/scripts"
   mkdir -p "$dest/references" "$dest/scripts"
   cp "$SRC_DIR/SKILL.md" "$dest/SKILL.md"
-  cp -R "$SRC_DIR/references/." "$dest/references/"
-  cp -R "$SRC_DIR/scripts/." "$dest/scripts/"
-  if [[ -d "$SRC_DIR/assets" ]]; then
-    mkdir -p "$dest/assets"
-    cp -R "$SRC_DIR/assets/." "$dest/assets/"
-  fi
+  cp "$SRC_DIR/references/"*.md "$dest/references/"
+  cp "$SRC_DIR/scripts/"*.py "$dest/scripts/"
   chmod +x "$dest/scripts/"*.py 2>/dev/null || true
   echo "[+] Installed ${SKILL_NAME} -> ${dest}"
 }
 
 if [[ "$HOST" == "all" ]]; then
-  for h in universal claude opencode codex cursor; do
+  for h in "${ALL_HOSTS[@]}"; do
     install_one "$h"
   done
 else
@@ -122,7 +120,7 @@ fi
 cat <<'EOF'
 
 [OK] Installed. Start a new agent session so the skill is discovered.
-    Then ask: "Use deep-ui-qa to audit https://staging.example.com ..."
+    Then ask: "Use blackbox-ui-qa to audit https://staging.example.com ..."
 
 Requirements:
     Python 3.10+ and openpyxl:   pip install openpyxl

@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""Smoke test for the deep-ui-qa scripts.
-
-Creates a temporary workspace, writes a small valid dataset, validates it, builds
-the workbook and checks the expected sheets. Run from the repository root:
-
-    python tests/smoke_test.py
-"""
+"""End-to-end smoke test suite for blackbox-ui-qa v2.0 scripts and demo generator."""
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,12 +14,14 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
+EXAMPLES = ROOT / "examples"
 
 
-def run(*args: str) -> subprocess.CompletedProcess:
+def run(*args: str, stdin_data: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, *args],
         cwd=ROOT,
+        input=stdin_data,
         text=True,
         capture_output=True,
     )
@@ -34,29 +31,57 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def populate(workspace: Path) -> None:
+def record(workspace: Path, subcommand: str, payload: dict | list[dict], *, use_file: bool = False) -> None:
+    if use_file:
+        batch_file = workspace / "_batch.json"
+        batch_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        res = run(str(SCRIPTS / "qa_record.py"), str(workspace), subcommand, "--file", str(batch_file))
+        batch_file.unlink()
+    else:
+        res = run(
+            str(SCRIPTS / "qa_record.py"),
+            str(workspace),
+            subcommand,
+            "--stdin",
+            stdin_data=json.dumps(payload),
+        )
+    assert res.returncode == 0, f"{subcommand} failed:\n{res.stdout}\n{res.stderr}"
+
+
+def populate_valid_deep(workspace: Path) -> None:
     meta_path = workspace / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta.update(
         {
             "staging_confirmed": True,
-            "version": "2026.10.3",
+            "version": "2026.11.2",
             "roles": ["Admin", "Payroll Admin"],
             "host": "test",
-            "browser_tool": "none",
+            "browser_tool": "Playwright MCP",
+            "capabilities": {
+                "dom_snapshot": True,
+                "screenshot": True,
+                "console": True,
+                "network": True,
+                "js_eval": True,
+                "multiple_contexts": True,
+                "downloads": True,
+                "iframes": False,
+                "can_freeze_time": False,
+            },
             "locale": "en-US",
-            "timezone": "Asia/Karachi",
-            "limitations": ["Manager role not available"],
-            "in_scope_modules": ["Payroll"],
+            "limitations": ["Manager role unavailable"],
+            "in_scope_modules": ["Payroll", "Employees"],
             "run_contract": {
                 "authorized_origins": ["https://staging.example.com"],
                 "allowed_actions": ["read", "create QA_ records", "edit QA_ records", "delete QA_ records"],
                 "forbidden_actions": ["finalise payroll", "send email"],
+                "direct_url_authz_checks": True,
                 "mutation_budget": "10 created records; 5 config changes",
                 "data_classification": "synthetic test data only",
                 "evidence_retention": "retain workspace until handoff",
                 "time_anchor": {
-                    "clock": "2026-11-04T09:00:00Z",
+                    "clock": "2026-11-24T09:00:00Z",
                     "user_timezone": "Asia/Karachi",
                     "tenant_timezone": "Asia/Karachi",
                     "can_freeze_time": False,
@@ -67,384 +92,249 @@ def populate(workspace: Path) -> None:
     )
     write_json(meta_path, meta)
 
-    controls = [
-        {
-            "id": "A-0001",
-            "state_id": "S-001",
-            "module": "Payroll",
-            "path": "Payroll > Run > Deductions > Loan deduction",
-            "label": "Loan deduction",
-            "control": "currency",
-            "required": "conditional",
-            "default": "0.00",
-            "options": [],
-            "options_count": 0,
-            "constraints": "min 0, max 30% of net, 2 decimals",
-            "helper_text": "Capped at 30% of net pay per Settings > Loans",
-            "depends_on": "Employee has an active loan",
-            "affects": "Net pay; loan balance; payslip",
-            "saves_how": "On Calculate",
-            "roles_visible": ["Payroll Admin"],
-            "tested_by": ["TC-0002"],
-            "not_tested_reason": "",
-            "notes": "",
-            "evidence": "evidence/snapshots/S-001.html",
-        },
-        {
-            "id": "A-0002",
-            "state_id": "S-001",
-            "module": "Payroll",
-            "path": "Payroll > Run > Summary > Net pay",
-            "label": "Net pay",
-            "control": "computed",
-            "required": "no",
-            "default": "empty",
-            "options": [],
-            "options_count": 0,
-            "constraints": "2 decimals",
-            "helper_text": "",
-            "depends_on": "Gross pay, deductions, taxes",
-            "affects": "Payslip; bank file",
-            "saves_how": "On Calculate",
-            "roles_visible": ["Payroll Admin"],
-            "tested_by": ["TC-0001"],
-            "not_tested_reason": "",
-            "notes": "",
-            "evidence": "",
-        },
-        {
-            "id": "A-0003",
-            "state_id": "S-002",
-            "module": "Payroll",
-            "path": "Payroll > Run > Settings > Rounding",
-            "label": "Rounding",
-            "control": "select",
-            "required": "yes",
-            "default": "Half-up",
-            "options": ["Half-up", "Half-even"],
-            "options_count": 2,
-            "constraints": "",
-            "helper_text": "",
-            "depends_on": "",
-            "affects": "All calculated amounts",
-            "saves_how": "On Save",
-            "roles_visible": ["Admin"],
-            "tested_by": [],
-            "not_tested_reason": "Rounding variants are out of scope for this run.",
-            "notes": "",
-            "evidence": "",
-        },
-    ]
-    write_json(workspace / "02-field-atlas.json", {"controls": controls})
+    for rel, content in {
+        "evidence/screenshots/TC-0001.png": "png\n",
+        "evidence/screenshots/TC-0002.png": "png\n",
+        "evidence/screenshots/TC-0003.png": "png\n",
+        "evidence/snapshots/TC-0004.html": "<html><body>Snapshot ok</body></html>\n",
+        "evidence/network/TC-0002.json": '{"deduction": 4800}\n',
+        "evidence/snapshots/C-0001.txt": "restored to 30\n",
+        "calc/TC-0001.py": "assert 10000 - 1000 - 500 == 8500\n",
+        "calc/TC-0002.py": "assert round(10000 * 0.30, 2) == 3000.00\n",
+    }.items():
+        p = workspace / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
 
-    relationships = [
-        {
-            "id": "R-0001",
-            "source": "Settings > Loans > Cap",
-            "target": "Payroll > Run > Deductions > Loan deduction",
-            "type": "computes",
-            "description": "The cap limits the loan deduction to a percentage of net pay.",
-            "evidence": "Perturbation E-001: cap 30% -> 10% changed deduction 3,000 -> 1,000.",
-            "confidence": "High",
-            "verified_by": ["TC-0002"],
-            "not_tested_reason": "",
-        },
-        {
-            "id": "R-0002",
-            "source": "Payroll > Run > Rounding",
-            "target": "Payslip > Net pay",
-            "type": "computes",
-            "description": "Rounding mode changes the final net pay.",
-            "evidence": "Static clue from helper text.",
-            "confidence": "Medium",
-            "verified_by": [],
-            "not_tested_reason": "Out of scope in this run.",
-        },
-    ]
-    write_json(workspace / "03-relationships.json", {"relationships": relationships})
+    # Controls: 3 controls, 1 unlinked (allowed in Deep risk-targeted mode!)
+    record(
+        workspace,
+        "add-control",
+        [
+            {
+                "state_id": "S-001",
+                "module": "Payroll",
+                "path": "Payroll > Run > Deductions > Loan deduction",
+                "label": "Loan deduction",
+                "control": "currency",
+                "required": "conditional",
+                "default": "0.00",
+                "constraints": "min 0, max 30% of net",
+                "roles_visible": ["Payroll Admin"],
+            },
+            {
+                "state_id": "S-001",
+                "module": "Payroll",
+                "path": "Payroll > Run > Summary > Net pay",
+                "label": "Net pay",
+                "control": "computed",
+                "roles_visible": ["Payroll Admin"],
+            },
+            {
+                "state_id": "S-002",
+                "module": "Employees",
+                "path": "Employees > List > Badge",
+                "label": "Active count badge",
+                "control": "badge",
+            },
+        ],
+        use_file=True,
+    )
 
-    test_cases = [
-        {
-            "id": "TC-0001",
-            "module": "Payroll",
-            "path": "Payroll > Run > Summary",
-            "title": "Net pay equals gross minus deductions and taxes",
-            "category": "Business Rules & Calculation",
-            "technique": "Invariant",
-            "priority": "P0",
-            "reason": "Net pay is the number employees are paid.",
-            "role": "Payroll Admin",
-            "preconditions": "QA_EMP_01 has gross 10,000, deductions 1,000 and tax 500.",
-            "test_data": "QA_EMP_01; August 2026 run",
-            "steps": ["Open Payroll > Run > August 2026.", "Calculate QA_EMP_01.", "Read net pay."],
-            "oracle": {
-                "type": "Calculation",
-                "source": "calc/TC-0001.py",
+    record(
+        workspace,
+        "add-relationship",
+        [
+            {
+                "source": "Settings > Loans > Cap",
+                "target": "Payroll > Run > Deductions > Loan deduction",
+                "type": "computes",
+                "description": "Cap limits loan deduction to percentage of net pay.",
+                "evidence": "Perturbation C-0001",
                 "confidence": "High",
-                "families": ["Claims", "Product", "Purpose"],
-                "description": "10,000 - 1,000 - 500 = 8,500.",
+            }
+        ],
+    )
+
+    # Test cases via batch + single CLI + update-case
+    record(
+        workspace,
+        "add-case",
+        [
+            {
+                "module": "Payroll",
+                "path": "Payroll > Run > Summary",
+                "title": "Net pay equals gross minus deductions and taxes",
+                "category": "Business Rules & Calculation",
+                "technique": "Invariant",
+                "priority": "P0",
+                "reason": "Employees must receive exact net pay.",
+                "role": "Payroll Admin",
+                "steps": ["Open Payroll > Run.", "Calculate QA_EMP_01.", "Reload and compare."],
+                "oracle": {"type": "Calculation", "source": "calc/TC-0001.py", "confidence": "High"},
+                "expected": "8,500.00",
+                "actual": "8,500.00 across UI and reload",
+                "status": "Pass",
+                "severity": "None",
+                "surfaces_checked": ["immediate", "reload", "summary"],
+                "atlas_ids": ["A-0002"],
+                "evidence": ["evidence/screenshots/TC-0001.png", "calc/TC-0001.py"],
+                "executed_at": "2026-11-24T10:00:00Z",
             },
-            "expected": "8,500.00",
-            "actual": "8,500.00",
-            "status": "Pass",
-            "severity": "None",
-            "defect_type": "",
-            "correlated_modules": ["Employees"],
-            "relationship_ids": ["R-0001"],
-            "atlas_ids": ["A-0002"],
-            "evidence": ["evidence/screenshots/TC-0001.png", "calc/TC-0001.py"],
-            "suggestion": "",
-            "notes": "",
-            "executed_at": "2026-11-04T12:00:00Z",
-        },
-        {
-            "id": "TC-0002",
-            "module": "Payroll",
-            "path": "Payroll > Run > Deductions",
-            "title": "Loan deduction is capped at 30% of net pay",
-            "category": "Business Rules & Calculation",
-            "technique": "Boundary value analysis",
-            "priority": "P0",
-            "reason": "Over-deduction directly underpays an employee.",
-            "role": "Payroll Admin",
-            "preconditions": "QA_EMP_02 has net pay 10,000 and an active loan balance of 8,000; cap is 30%.",
-            "test_data": "QA_EMP_02; loan QA_LOAN_01; August 2026 run",
-            "steps": [
-                "Open Payroll > Run > August 2026.",
-                "Add QA_EMP_02 and calculate.",
-                "Open the deduction breakdown.",
-            ],
-            "oracle": {
-                "type": "Calculation + in-app policy",
-                "source": "Settings > Loans > Cap = 30%; calc/TC-0002.py",
-                "confidence": "High",
-                "families": ["Claims", "World", "Product"],
-                "description": "Loan deduction must be <= 30% of net pay; expected 3,000.",
+            {
+                "module": "Payroll",
+                "path": "Payroll > Run > Deductions",
+                "title": "Loan deduction exceeds 30% cap for QA_EMP_02",
+                "category": "Business Rules & Calculation",
+                "technique": "Boundary value analysis",
+                "priority": "P0",
+                "reason": "Over-deduction underpays employees.",
+                "role": "Payroll Admin",
+                "preconditions": "QA_EMP_02 net pay 10,000; loan 8,000; cap 30%.",
+                "steps": ["Open Payroll > Run.", "Add QA_EMP_02 and calculate."],
+                "oracle": {"type": "Calculation", "source": "calc/TC-0002.py", "confidence": "High"},
+                "expected": "Loan deduction = 3,000.00; net pay = 7,000.00.",
+                "actual": "Loan deduction = 4,800.00; net pay = 5,200.00.",
+                "status": "Fail",
+                "severity": "High",
+                "defect_type": "Calculation",
+                "surfaces_checked": ["immediate", "reload", "network"],
+                "relationship_ids": ["R-0001"],
+                "atlas_ids": ["A-0001"],
+                "evidence": ["evidence/screenshots/TC-0002.png", "evidence/network/TC-0002.json", "calc/TC-0002.py"],
+                "suggestion": "Apply cap after tax and deductions.",
+                "triage": {"disposition": "Defect", "reason": "Reproduced twice cleanly."},
+                "executed_at": "2026-11-24T10:20:00Z",
             },
-            "expected": "Loan deduction = 3,000.00; net pay = 7,000.00.",
-            "actual": "Loan deduction = 4,800.00; net pay = 5,200.00.",
-            "status": "Fail",
-            "severity": "High",
-            "defect_type": "Calculation",
-            "correlated_modules": ["Employees", "Loans", "Reports"],
-            "relationship_ids": ["R-0001"],
-            "atlas_ids": ["A-0001"],
-            "evidence": [
-                "evidence/screenshots/TC-0002.png",
-                "evidence/network/TC-0002.json",
-                "calc/TC-0002.py",
-            ],
-            "suggestion": "Apply the cap after tax and other deductions; add a boundary regression test.",
-            "notes": "Reproduced twice; persists after reload.",
-            "triage": {
-                "disposition": "Defect",
-                "reason": "Reproduced twice from a clean state; expected derived independently before observing the actual.",
-                "evidence": ["evidence/screenshots/TC-0002.png"],
-            },
-            "executed_at": "2026-11-04T12:40:00Z",
-        },
-        {
-            "id": "TC-0003",
-            "module": "Payroll",
-            "path": "Payroll > Run > Bank file",
-            "title": "Bank file download for a finalised run",
-            "category": "Outputs & Documents",
-            "technique": "CRUD matrix",
-            "priority": "P1",
-            "reason": "The bank file is the payment instruction.",
-            "role": "Payroll Admin",
-            "preconditions": "A finalised run exists.",
-            "test_data": "QA_RUN_01",
-            "steps": ["Open the finalised run.", "Click Download bank file."],
-            "oracle": {
-                "type": "User spec",
-                "source": "Scope: bank file must match the run total.",
-                "confidence": "Medium",
-                "families": ["Claims", "World", "Purpose"],
-                "description": "File total equals the run net total.",
-            },
-            "expected": "A CSV whose total equals the run net total.",
-            "actual": "Download blocked: the test role lacks the export permission.",
-            "status": "Blocked",
-            "severity": "None",
-            "defect_type": "",
-            "correlated_modules": ["Reports"],
-            "relationship_ids": [],
-            "atlas_ids": [],
-            "evidence": ["evidence/screenshots/TC-0003.png"],
-            "suggestion": "",
-            "notes": "Export permission is not available for the provided role.",
-            "triage": {
-                "disposition": "Environment/data",
-                "reason": "The provided role lacks the export permission; this is an access limitation, not a product defect.",
+            {
+                "module": "Employees",
+                "path": "Employees > List",
+                "title": "Admin creates and deletes QA_EMP_03 cleanly",
+                "category": "CRUD & Lifecycle",
+                "technique": "CRUD matrix",
+                "priority": "P1",
+                "reason": "Employee lifecycle must persist cleanly.",
+                "role": "Admin",
+                "steps": ["Create QA_EMP_03.", "Reload list.", "Delete QA_EMP_03."],
+                "oracle": {"type": "Consistency invariant", "source": "Employees list", "confidence": "High"},
+                "expected": "Record persists on reload and disappears after delete.",
+                "actual": "Persisted and deleted cleanly.",
+                "status": "Pass",
+                "severity": "None",
+                "surfaces_checked": ["immediate", "reload"],
                 "evidence": ["evidence/screenshots/TC-0003.png"],
+                "executed_at": "2026-11-24T10:30:00Z",
             },
-            "executed_at": "2026-11-04T13:00:00Z",
-        },
-        {
-            "id": "TC-0004",
-            "module": "Payroll",
-            "path": "Payroll > Run > Summary",
-            "title": "Rounding label is inconsistent with the settings page",
-            "category": "UI & Content",
-            "technique": "Differential",
-            "priority": "P3",
-            "reason": "Inconsistent terminology can cause misconfiguration.",
-            "role": "Payroll Admin",
-            "preconditions": "None.",
-            "test_data": "",
-            "steps": ["Open Payroll > Run > Summary.", "Compare the rounding label with Settings > Rounding."],
-            "oracle": {
-                "type": "Consistency invariant",
-                "source": "Same setting should use the same label.",
-                "confidence": "Medium",
-                "description": "The label should match.",
+            {
+                "module": "Payroll",
+                "path": "Payroll > Run > Bank file",
+                "title": "Planned bank file format check",
+                "category": "Outputs & Documents",
+                "technique": "Round-trip",
+                "priority": "P2",
+                "reason": "Bank file must reconcile with net pay.",
+                "role": "Payroll Admin",
+                "steps": ["Finalise run.", "Download bank file."],
+                "oracle": {"type": "User spec", "source": "Run contract", "confidence": "High"},
+                "expected": "CSV matches net total.",
+                "actual": "",
+                "status": "Not Run",
+                "severity": "None",
+                "notes": "Skipped because payroll finalisation is forbidden.",
+                "evidence": ["evidence/snapshots/TC-0004.html"],
             },
-            "expected": "The same label on both screens.",
-            "actual": "Summary says 'Rounding method'; settings says 'Rounding mode'.",
-            "status": "Observation",
-            "severity": "Low",
-            "defect_type": "UI/UX",
-            "correlated_modules": ["Settings"],
-            "relationship_ids": [],
-            "atlas_ids": [],
-            "evidence": ["evidence/screenshots/TC-0004.png"],
-            "suggestion": "Use one label.",
-            "notes": "Cosmetic; recorded as an observation.",
-            "triage": {
-                "disposition": "Observation",
-                "reason": "The label difference is real but cosmetic; it does not contradict a functional oracle.",
-                "evidence": ["evidence/screenshots/TC-0004.png"],
-            },
-            "executed_at": "2026-11-04T13:10:00Z",
-        },
-    ]
-    write_json(workspace / "05-test-cases.json", {"test_cases": test_cases})
+        ],
+    )
 
-    defects = [
+    # Test update-case & add-defect --from-case
+    res = run(
+        str(SCRIPTS / "qa_record.py"),
+        str(workspace),
+        "update-case",
+        "--id",
+        "TC-0004",
+        "--status",
+        "Blocked",
+        "--notes",
+        "Blocked by forbidden payroll finalisation action.",
+    )
+    assert res.returncode == 0, res.stderr
+
+    res = run(
+        str(SCRIPTS / "qa_record.py"),
+        str(workspace),
+        "add-defect",
+        "--from-case",
+        "TC-0002",
+        "--environment",
+        "staging, Payroll Admin",
+        "--impact",
+        "Employee underpaid by 1,800.00.",
+        "--likely-cause",
+        "Cap calculated on gross pay (hypothesis).",
+    )
+    assert res.returncode == 0, res.stderr
+
+    record(
+        workspace,
+        "add-fixture",
+        {"name": "QA_EMP_02_loan_cap", "purpose": "Loan cap boundary", "design": "isolate", "status": "deleted"},
+    )
+    record(
+        workspace,
+        "log-config",
         {
-            "id": "DEF-0001",
-            "title": "Loan deduction exceeds the 30% cap for QA_EMP_02",
-            "severity": "High",
-            "type": "Calculation",
-            "module": "Payroll",
-            "path": "Payroll > Run > Deductions",
-            "test_case_ids": ["TC-0002"],
-            "environment": "staging, build 2026.10.3, Payroll Admin, en-US, UTC+5",
-            "preconditions": "QA_EMP_02 net pay 10,000; loan balance 8,000; cap 30%.",
-            "steps": [
-                "Open Payroll > Run > August 2026.",
-                "Add QA_EMP_02 and calculate.",
-                "Open the deduction breakdown.",
-            ],
-            "expected": "Loan deduction <= 3,000.00.",
-            "actual": "Loan deduction 4,800.00; net pay 5,200.00.",
-            "evidence": ["evidence/screenshots/TC-0002.png", "calc/TC-0002.py"],
-            "impact": "Employee is underpaid; payroll cannot be finalised.",
-            "likely_cause": "Cap applied to gross pay instead of net (hypothesis).",
-            "suggestion": "Apply the cap after tax and other deductions.",
-            "workaround": "Manually reduce the deduction before finalising.",
+            "path": "Settings > Loans > Cap",
+            "setting": "Cap",
+            "original": "30",
+            "changed_to": "10",
+            "role": "Admin",
+            "reason": "Perturbation",
+        },
+    )
+    res = run(
+        str(SCRIPTS / "qa_record.py"),
+        str(workspace),
+        "restore-config",
+        "--id",
+        "C-0001",
+        "--restored-value",
+        "30",
+        "--evidence",
+        "evidence/snapshots/C-0001.txt",
+    )
+    assert res.returncode == 0, res.stderr
+
+    record(
+        workspace,
+        "add-config-matrix",
+        {
+            "area": "Settings > Loans",
+            "setting": "Cap",
+            "options": ["10", "30"],
+            "branch": "Loan deduction limit",
+            "profile_value": "30",
+            "tested_by": ["TC-0002"],
+        },
+    )
+    record(
+        workspace,
+        "add-question",
+        {
+            "type": "Question",
+            "description": "Does loan cap apply before or after statutory tax?",
+            "impact": "Affects net cap boundary.",
+            "owner": "Product",
             "status": "Open",
-            "notes": "",
-            "created_at": "2026-11-04T12:45:00Z",
-        }
-    ]
-    write_json(workspace / "06-defects.json", {"defects": defects})
-
-    write_json(
-        workspace / "07-fixtures-and-config-ledger.json",
-        {
-            "fixtures": [
-                {
-                    "id": "F-0001",
-                    "name": "QA_EMP_02_loan_cap",
-                    "purpose": "Loan cap boundary",
-                    "design": "stacked",
-                    "created_via": "Employees > Add",
-                    "status": "active",
-                    "cleanup": "delete after the payroll run",
-                    "notes": "",
-                }
-            ],
-            "config_changes": [
-                {
-                    "id": "C-0001",
-                    "path": "Settings > Loans > Cap",
-                    "setting": "Cap",
-                    "original": "30",
-                    "changed_to": "10",
-                    "changed_at": "2026-11-04T10:00:00Z",
-                    "role": "Admin",
-                    "reason": "Perturbation E-001",
-                    "restored": True,
-                    "restored_at": "2026-11-04T10:10:00Z",
-                    "restored_value": "30",
-                    "evidence": "evidence/snapshots/E-001.html",
-                    "notes": "",
-                }
-            ],
-            "configuration_matrix": [
-                {
-                    "id": "CFG-0001",
-                    "area": "Payroll > Run > Settings",
-                    "setting": "Rounding",
-                    "options": ["Half-up", "Half-even"],
-                    "branch": "All calculated amounts",
-                    "profile_value": "Half-even",
-                    "tested_by": [],
-                    "not_tested_reason": "Rounding variants are out of scope in this run.",
-                }
-            ],
+            "related": ["TC-0002", "R-0001"],
         },
     )
-
-    write_json(
-        workspace / "08-open-questions.json",
-        {
-            "items": [
-                {
-                    "id": "Q-0001",
-                    "type": "Question",
-                    "description": "Should the loan cap apply before or after tax?",
-                    "impact": "Affects the expected net pay for TC-0002.",
-                    "owner": "Product owner",
-                    "status": "Open",
-                    "related": ["TC-0002", "R-0001"],
-                },
-                {
-                    "id": "Q-0002",
-                    "type": "Limitation",
-                    "description": "Manager role was not available, so manager-only approval paths were not tested.",
-                    "impact": "Permission coverage is partial.",
-                    "owner": "QA",
-                    "status": "Open",
-                    "related": [],
-                },
-            ]
-        },
-    )
-
-    for relative in [
-        "evidence/screenshots/TC-0001.png",
-        "evidence/screenshots/TC-0002.png",
-        "evidence/screenshots/TC-0003.png",
-        "evidence/screenshots/TC-0004.png",
-        "evidence/network/TC-0002.json",
-        "evidence/snapshots/E-001.html",
-        "evidence/snapshots/S-001.html",
-        "evidence/security/injection_excerpt.txt",
-        "calc/TC-0001.py",
-        "calc/TC-0002.py",
-    ]:
-        path = workspace / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("sample evidence\n", encoding="utf-8")
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="deep-ui-qa-smoke-") as temp:
+    with tempfile.TemporaryDirectory(prefix="blackbox-ui-qa-smoke-") as temp:
         workspace = Path(temp) / "workspace"
-        result = run(
+        res = run(
             str(SCRIPTS / "init_workspace.py"),
             "--app",
             "Acme HR",
@@ -452,22 +342,35 @@ def main() -> int:
             "https://staging.example.com",
             "--module",
             "Payroll",
+            "--module",
+            "Employees",
             "--workspace",
             str(workspace),
         )
-        assert result.returncode == 0, result.stderr
-        assert (workspace / "SKILL.md").exists() is False  # workspace is not the skill
+        assert res.returncode == 0, res.stderr
+        assert (workspace / "SKILL.md").exists() is False
 
-        populate(workspace)
+        # Overwrite guard must block without --force
+        res = run(
+            str(SCRIPTS / "init_workspace.py"),
+            "--app",
+            "Acme HR",
+            "--workspace",
+            str(workspace),
+        )
+        assert res.returncode != 0, "init_workspace should refuse non-empty dir without --force"
 
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "Errors: 0" in result.stdout, result.stdout
+        populate_valid_deep(workspace)
+
+        # Strict validation must succeed cleanly (includes Not Run/Blocked without actual!)
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--strict")
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert "Errors: 0 | Warnings: 0" in res.stdout, res.stdout
 
         output = workspace / "report.xlsx"
-        result = run(str(SCRIPTS / "build_report.py"), str(workspace), "--output", str(output))
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert output.exists(), result.stdout
+        res = run(str(SCRIPTS / "build_report.py"), str(workspace), "--output", str(output))
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert output.exists()
 
         wb = load_workbook(output)
         expected_sheets = [
@@ -481,127 +384,140 @@ def main() -> int:
             "Open Questions",
         ]
         assert wb.sheetnames == expected_sheets, wb.sheetnames
-        assert wb["Summary"]["A1"].value == "Deep UI QA Report"
-        assert len(wb["Summary"]._charts) == 2, len(wb["Summary"]._charts)
-        assert wb["Test Cases"].max_row == 5, wb["Test Cases"].max_row
-        assert wb["Test Cases"]["O2"].value == "Pass", wb["Test Cases"]["O2"].value
-        assert wb["Test Cases"]["O3"].value == "Fail", wb["Test Cases"]["O3"].value
-        assert wb["Test Cases"]["Y3"].value == "Defect", wb["Test Cases"]["Y3"].value
-        assert wb["Defects"].max_row == 2, wb["Defects"].max_row
-        assert wb["Field Atlas"].max_row == 4, wb["Field Atlas"].max_row
-        assert wb["Relationships"].max_row == 3, wb["Relationships"].max_row
-        assert wb["Coverage"]["A3"].value == "Payroll", wb["Coverage"]["A3"].value
-        summary_values = [cell.value for row in wb["Summary"].iter_rows() for cell in row if cell.value]
+        assert wb["Summary"]["A1"].value == "Blackbox UI QA Report"
+        assert len(wb["Summary"]._charts) == 2
+        summary_values = [c.value for r in wb["Summary"].iter_rows() for c in r if c.value is not None]
+        assert "Defect Status" in summary_values, summary_values
+        assert "Open questions / items" in summary_values, summary_values
         assert "Reconciliation" in summary_values, summary_values
-        assert "Anomaly triage" in summary_values, summary_values
-        assert "Run contract" in summary_values, summary_values
-        coverage_values = [cell.value for row in wb["Coverage"].iter_rows() for cell in row if cell.value]
-        assert "Module traceability" in coverage_values, coverage_values
-        config_values = [cell.value for row in wb["Test Data & Config"].iter_rows() for cell in row if cell.value]
-        assert "Configuration matrix" in config_values, config_values
+        # Merged cells must preserve borders across siblings
+        assert wb["Summary"]["B4"].border.top.style == "thin"
+        assert wb["Summary"]["C4"].border.top.style == "thin"
+        # Test Data & Config banner must merge across 13 columns (A1:M1)
+        merges_tdc = {str(r) for r in wb["Test Data & Config"].merged_cells.ranges}
+        assert "A1:M1" in merges_tdc, merges_tdc
+        # Test Cases has Surfaces Checked (col R) and Status at O, Severity at P
+        assert wb["Test Cases"]["R1"].value == "Surfaces Checked"
+        assert wb["Test Cases"]["O2"].value == "Pass"
+        assert wb["Test Cases"]["O3"].value == "Fail"
+        assert wb["Defects"].max_row == 2
+        assert wb["Field Atlas"].max_column == 17
 
-        # Negative path: a Fail without evidence or a linked defect must block a final report.
-        cases_path = workspace / "05-test-cases.json"
-        cases = json.loads(cases_path.read_text(encoding="utf-8"))
-        first = cases["test_cases"][0]
-        first["status"] = "Fail"
-        first["evidence"] = []
-        first["severity"] = "High"
-        first["defect_type"] = "Functional"
-        write_json(cases_path, cases)
+        # Guided sheet export
+        guided = workspace / "guided.xlsx"
+        res = run(str(SCRIPTS / "build_report.py"), str(workspace), "--guided-sheet", "--output", str(guided))
+        assert res.returncode == 0, res.stdout + res.stderr
+        gwb = load_workbook(guided)
+        assert gwb.sheetnames == ["Guided Execution"]
+        assert gwb["Guided Execution"].max_row == 5
 
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode != 0, "validation should fail for a Fail without evidence/defect"
-        assert "fail_without_evidence" in result.stdout, result.stdout
-        assert "fail_without_defect" in result.stdout, result.stdout
-        assert "fail_without_triage" in result.stdout, result.stdout
+        # Snapshot clean populated workspace once for isolated negative checks
+        baseline = Path(temp) / "baseline"
+        shutil.copytree(workspace, baseline)
 
-        result = run(str(SCRIPTS / "build_report.py"), str(workspace), "--output", str(workspace / "blocked.xlsx"))
-        assert result.returncode != 0, "build_report should refuse a final report with errors"
+        def reset() -> None:
+            shutil.rmtree(workspace)
+            shutil.copytree(baseline, workspace)
 
-        draft = workspace / "draft.xlsx"
-        result = run(
-            str(SCRIPTS / "build_report.py"),
-            str(workspace),
-            "--allow-incomplete",
-            "--output",
-            str(draft),
+        # Negative 1: v1.0 schema_version rejected
+        meta_path = workspace / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["schema_version"] = "1.0"
+        write_json(meta_path, meta)
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        assert any(e["code"] == "bad_schema_version" for e in json.loads(res.stdout)["errors"])
+
+        # Negative 2: Exhaustive mode enforces uncovered_control
+        reset()
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["depth"] = "Exhaustive"
+        meta["atlas_coverage_mode"] = "full"
+        write_json(meta_path, meta)
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        assert any(e["code"] == "uncovered_control" for e in json.loads(res.stdout)["errors"])
+
+        # Negative 3: Secret inside .html snapshot blocks final report
+        reset()
+        (workspace / "evidence/snapshots/leak.html").write_text(
+            "<div>Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9_REALTOKEN</div>\n",
+            encoding="utf-8",
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        draft_wb = load_workbook(draft)
-        assert "DRAFT" in str(draft_wb["Summary"]["A3"].value), draft_wb["Summary"]["A3"].value
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        errs = json.loads(res.stdout)["errors"]
+        assert any(e["code"] == "possible_secret" and "evidence/snapshots/leak.html" in e["ref"] for e in errs), errs
 
-        # Negative path: an uncovered control is an unreconciled gap.
-        populate(workspace)
-        atlas_path = workspace / "02-field-atlas.json"
-        atlas = json.loads(atlas_path.read_text(encoding="utf-8"))
-        atlas["controls"][0]["tested_by"] = []
-        atlas["controls"][0]["not_tested_reason"] = ""
-        write_json(atlas_path, atlas)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
-        assert result.returncode != 0, "validation should fail for an uncovered control"
-        report = json.loads(result.stdout)
-        assert report["stats"]["reconciliation"]["controls_unexplained"] == 1, report["stats"]
-        assert any(issue["code"] == "uncovered_control" for issue in report["errors"]), report["errors"]
-
-        # Negative path: a Pass without evidence is an error.
-        populate(workspace)
+        # Negative 4: Missing evidence file and path traversal are errors
+        reset()
         cases_path = workspace / "05-test-cases.json"
         cases = json.loads(cases_path.read_text(encoding="utf-8"))
-        cases["test_cases"][0]["evidence"] = []
+        cases["test_cases"][0]["evidence"] = ["evidence/screenshots/does_not_exist.png"]
         write_json(cases_path, cases)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode != 0, "validation should fail for a Pass without evidence"
-        assert "pass_without_evidence" in result.stdout, result.stdout
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        assert any(e["code"] == "evidence_path_missing" for e in json.loads(res.stdout)["errors"])
 
-        # Negative path: a Fail without triage is an error even when a defect is linked.
-        populate(workspace)
-        cases_path = workspace / "05-test-cases.json"
+        cases["test_cases"][0]["evidence"] = ["../outside.png"]
+        write_json(cases_path, cases)
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        assert any(e["code"] == "bad_evidence_path" for e in json.loads(res.stdout)["errors"])
+
+        # Negative 5: Triage disposition mismatch & missing steps on Fail
+        reset()
         cases = json.loads(cases_path.read_text(encoding="utf-8"))
-        del cases["test_cases"][1]["triage"]
+        cases["test_cases"][0]["triage"] = {"disposition": "Defect", "reason": "Wrong"}
+        cases["test_cases"][1]["steps"] = []
         write_json(cases_path, cases)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode != 0, "validation should fail for a Fail without triage"
-        assert "fail_without_triage" in result.stdout, result.stdout
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        codes = {e["code"] for e in json.loads(res.stdout)["errors"]}
+        assert "triage_defect_without_fail" in codes
+        assert "fail_without_steps" in codes
 
-        # Negative path: a defect with no linked case is an orphan.
-        populate(workspace)
-        defects_path = workspace / "06-defects.json"
-        defects = json.loads(defects_path.read_text(encoding="utf-8"))
-        defects["defects"][0]["test_case_ids"] = []
-        write_json(defects_path, defects)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode != 0, "validation should fail for an orphan defect"
-        assert "defect_without_case" in result.stdout, result.stdout
-        assert "fail_without_defect" in result.stdout, result.stdout
-
-        # Negative path: a case without a status leaves the counts unreconciled.
-        populate(workspace)
-        cases_path = workspace / "05-test-cases.json"
-        cases = json.loads(cases_path.read_text(encoding="utf-8"))
-        cases["test_cases"][0]["status"] = ""
-        write_json(cases_path, cases)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
-        assert result.returncode != 0, "validation should fail for an unreconciled count"
-        report = json.loads(result.stdout)
-        assert report["stats"]["reconciliation"]["cases_unaccounted"] == 1, report["stats"]
-        assert report["stats"]["reconciliation"]["ok"] is False, report["stats"]
-
-        # Negative path: a configuration-matrix row with no case and no reason is a gap.
-        populate(workspace)
+        # Negative 6: Config matrix duplicate id & invalid profile_value
+        reset()
         ledger_path = workspace / "07-fixtures-and-config-ledger.json"
         ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-        ledger["configuration_matrix"][0]["tested_by"] = []
-        ledger["configuration_matrix"][0]["not_tested_reason"] = ""
+        ledger["configuration_matrix"][0]["profile_value"] = "999"
+        ledger["configuration_matrix"].append(dict(ledger["configuration_matrix"][0]))
         write_json(ledger_path, ledger)
-        result = run(str(SCRIPTS / "validate_workspace.py"), str(workspace))
-        assert result.returncode != 0, "validation should fail for an unexplained configuration row"
-        assert "config_matrix_uncovered" in result.stdout, result.stdout
+        res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--json")
+        assert res.returncode != 0
+        codes = {e["code"] for e in json.loads(res.stdout)["errors"]}
+        assert "bad_profile_value" in codes
+        assert "duplicate_id" in codes
 
-        print("Smoke test passed.")
-        print(f"Workbook: {output}")
-        print(f"Sheets: {', '.join(wb.sheetnames)}")
-        print("Negative validation and draft path passed.")
+        # Negative 7: Blocked without notes/actual fails; draft still builds
+        reset()
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))
+        cases["test_cases"][3]["notes"] = ""
+        cases["test_cases"][3]["actual"] = ""
+        write_json(cases_path, cases)
+        res = run(str(SCRIPTS / "build_report.py"), str(workspace), "--output", str(workspace / "blocked.xlsx"))
+        assert res.returncode != 0
+        draft = workspace / "draft.xlsx"
+        res = run(str(SCRIPTS / "build_report.py"), str(workspace), "--allow-incomplete", "--output", str(draft))
+        assert res.returncode == 0
+        assert "DRAFT" in str(load_workbook(draft)["Summary"]["A3"].value)
+
+        # End-to-end check on examples/make_demo.py into temp dir
+        demo_ws = Path(temp) / "demo-ws"
+        demo_xlsx = Path(temp) / "demo.xlsx"
+        res = run(
+            str(EXAMPLES / "make_demo.py"),
+            "--workspace",
+            str(demo_ws),
+            "--report",
+            str(demo_xlsx),
+        )
+        assert res.returncode == 0, res.stdout + res.stderr
+        dwb = load_workbook(demo_xlsx)
+        assert dwb["Summary"]["E9"].value == "1440x900; 390x844"
+
+    print("All v2.0 smoke tests passed.")
     return 0
 
 

@@ -1,89 +1,51 @@
-# Deep UI QA
+# Blackbox UI QA
 
-**Black-box QA that thinks before it clicks.**
+**Adversarial, model-driven black-box QA for any web app you can only reach through the UI.**
 
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-SKILL.md-1F3864)](https://agentskills.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](CHANGELOG.md)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](https://www.python.org/)
-[![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf-548235)](#installation)
+[![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf_%7C_Gemini_%7C_Copilot-548235)](#installation)
 
-`deep-ui-qa` turns an AI agent into a disciplined black-box QA team for web apps you can only reach through the UI. It maps the product before testing it, models how modules and settings affect each other, designs tests with real oracles, executes them in a real browser, and produces an evidence-backed Excel report.
+`blackbox-ui-qa` turns an AI agent into a sharp black-box QA team for **UI-only** testing across enterprise SaaS/ERP/HRMS platforms, modern reactive SPAs, transactional checkouts, legacy iframe/Shadow-DOM portals, and AI-assisted UIs.
 
-It is built for the messy reality of SaaS, ERP, HRMS, payroll, CRM, admin panels and staging sites: deeply nested tabs, settings that silently change other modules, calculations with no visible formula, roles that see different screens, and no source code.
-
-## What's new in 1.1.0
-
-- **Run contracts** — authorized origins, allowed and forbidden actions, mutation budget, data classification, evidence retention, time anchor and a checkable end state.
-- **Anomaly triage** — every anomaly is classified before it becomes a defect; only a reproduced, oracle-backed `Defect` becomes `Fail`.
-- **Oracle completeness** — FEW HICCUPPS generates multiple oracles for high-impact outputs, so a verdict never rests on one guess.
-- **Configuration and cycles** — a valid feature-complete configuration profile, stacked/isolate/control fixtures, multi-cycle carry-forward and stage reconciliation.
-- **Modern UI surfaces** — a WCAG 2.2 AA manual pass, an AI-assisted/generative UI lens, and explicit prompt-injection and evidence-privacy boundaries.
-- **Provable counts** — Summary reconciliation and Coverage module traceability; unexplained gaps, orphans and unevidenced passes block the final report.
+Instead of drowning in waterfall spreadsheets or shallow "click every button" checklists, it maps the application, probes causal settings and cross-module ripples, verifies calculations outside the app, hunts async races and broken permissions in a live browser, and produces a validated Excel report.
 
 ---
 
-## Why this exists
+## What's new in 2.0.0
 
-Most "AI QA" prompts produce a long list of shallow checks: open the page, click the button, confirm it exists. That is not testing. It misses the defects that matter — the loan deduction that ignores its cap, the approval that can still be edited after sign-off, the export that ignores the active filter, the setting that changes history retroactively.
-
-Deep UI QA is built around a different order:
-
-> **Understand the product first. Design tests from the model. Execute with evidence. Report honestly.**
-
-The skill is deliberately not a brittle auto-crawler. A generic crawler can click every button and still understand nothing. The agent maps the app, reasons about what should happen, and then uses browser automation to prove it.
+- **Risk-Driven 3-Stage Loop (replacing waterfall paralysis):** Rapid Map & Surface Health Sweep → Deep Model & Interleaved Risk Execution → Second-Look Charters, Report & Cleanup. High-risk flows are tested early instead of stalling behind thousands of decorative UI-chrome atlas rows.
+- **Protected Deep Rigor:** `Deep` and `Exhaustive` runs preserve Ring 0/1 cross-module modeling, single-factor perturbation experiments, independent `calc/*.py` verification, and 7-surface persistence checks.
+- **Universal Web & SPA Coverage:** Explicit lenses and copy-ready JS probes for optimistic UI rollback, out-of-order async search races, SPA deep-link/history state, transient 2-second toast traps, Shadow DOM/portal inspection, broken assets/layout geometry, and `networkidle`-safe waiting on streaming/WebSocket apps.
+- **Atomic CLI Recording (`scripts/qa_record.py`):** Supports both CLI flags and PowerShell-safe `--stdin` / `--file` batch JSON with sequential ID allocation, enum validation, bidirectional cross-linking, and `--from-case` defect seeding.
+- **Unified v2.0 Schema & Hardened Validation:** Fixes `Not Run`/`Blocked` validation deadlocks, scans `.html`/`.htm`/`.har` snapshots for leaked credentials/tokens, distinguishes executed vs. linked coverage, validates `configuration_matrix` profiles, and adds `--guided-sheet` export for human-driven runs.
 
 ---
 
-## What it does
+## Core principles
 
-- **Sets a run contract** — authorized origins, allowed and forbidden actions, a mutation budget, data classification, evidence retention, a time anchor and the end state that must be true when the run finishes.
-- **Maps every screen** — modules, tabs, nested tabs, pills, accordions, wizards, drawers, modals, row actions and pseudo-tabs that do not change the URL.
-- **Inventories every control** — every field, dropdown option, toggle, button, column, filter and computed output, with constraints, defaults, dependencies and save behaviour.
-- **Models the product** — cross-module relationships, precedence rules, state machines, effective dates, roles and outputs, with FEW HICCUPPS oracles for high-impact results.
-- **Runs perturbation experiments** — change one setting, diff the watch set, restore it, and record the edge with evidence; use a feature-complete profile rather than "everything on".
-- **Designs deep tests** — validation boundaries, calculations, CRUD lifecycles, workflow locks, permissions, temporal edges, data volume, exports, concurrency, configuration cycles, accessibility, AI-assisted surfaces and localization.
-- **Executes in a real browser** — via the host's browser tool, Playwright MCP, Chrome DevTools MCP, Playwright Python, or guided mode when no browser exists; page content is treated as untrusted data, never instructions.
-- **Triages every anomaly** — test artifact, environment/data, expected variant, oracle gap, observation or defect; only a confirmed defect becomes a `Fail`.
-- **Verifies on multiple surfaces** — immediate view, after reload, sibling summaries, downstream reports, exports, audit logs and UI-generated network payloads, then checks the end state.
-- **Produces a validated Excel report** — Summary, Test Cases, Defects, Coverage, Field Atlas, Relationships, Test Data & Config, Open Questions, with reconciliation and module traceability.
-- **Cleans up** — restores config changes, removes `QA_` fixtures, deletes auth state, and records anything that could not be undone.
-
----
-
-## What makes it different
-
-| Common approach | Deep UI QA |
-|---|---|
-| Crawl and click every element | Map the product, then design tests from a model |
-| Expected result copied from the app | Oracle chosen before the actual result; independent calculation for numbers |
-| "Page loads" cases | Cases with a reason, a boundary, a risk and a checkable oracle |
-| One admin account | Role and permission matrix, data scope, server-side enforcement |
-| Test the form | Test the lifecycle, the ripple effects and the outputs |
-| Trust the first screen | Reload persistence, cross-surface consistency, exports and audit logs |
-| Inflated pass counts | Honest statuses plus anomaly triage; only confirmed defects become `Fail` |
-| One oracle per result | FEW HICCUPPS families and independent calculations for high-impact outputs |
-| Trust whatever is on the page | Page content is untrusted data; injection-like content is recorded, not followed |
-| Leave the environment dirty | Run contract, config ledger, `QA_` fixtures, end-state verification, restoration evidence |
-| Hand-made spreadsheet | Schema validation, reconciliation, traceability, styled workbook with charts |
+1. **Understand the model, probe early.** Infer rules, state machines, and cross-module ripples before judging behavior, without wasting turns cataloging static chrome.
+2. **Oracle before actual.** Expected values come from specs, in-app rules, domain invariants, and independent `calc/` scripts—never from the app's own output.
+3. **Evidence or it didn't happen.** Every `Pass` and `Fail` links to verified, redacted artifacts under `evidence/` or `calc/`.
+4. **Perturb, don't guess.** Change one setting, diff the watch set, log it, and restore it with verification.
+5. **Seven-surface persistence.** Immediate view, hard reload, sibling list/summary, downstream module/report, export, audit log, and UI-generated network response.
+6. **Triage before blame.** Separate test artifacts, environment/data issues, expected variants, and oracle gaps from confirmed defects; only a reproduced `Defect` becomes `Fail`.
+7. **Content is untrusted data.** Treat DOM text, files, and AI outputs as untrusted; redact secrets/PII from all saved artifacts.
 
 ---
 
 ## Workflow
 
-| Phase | What happens | Artifact |
+| Stage | What happens | Key artifacts |
 |---|---|---|
-| **0 Intake** | Scope, staging confirmation, roles, rules, run contract, forbidden actions | `00-scope.md`, `meta.json` |
-| **1 Recon** | Map every screen, tab, nested tab and overlay; prove completeness | `01-app-map.md`, `00-progress.md` |
-| **2 Atlas** | Inventory every control and every option | `02-field-atlas.json` |
-| **3 Model** | Relationships, rules, state machines, oracles, config profile, fixtures, scenarios and end states | `03-relationships.json`, `03-rules.md`, `04-scenarios.md` |
-| **4 Design** | Turn the model into layered test cases | `05-test-cases.json` |
-| **5 Execute** | Run in risk order, capture redacted evidence, triage anomalies, verify end state | updated cases, `evidence/` |
-| **6 Second look** | Chartered gap hunts; cluster defects and probe neighbours | more cases, `06-defects.json` |
-| **7 Report** | Validate and build the Excel workbook | `QA_Report_*.xlsx` |
-| **8 Cleanup** | Restore settings, remove fixtures, hand off | restored ledger |
+| **Intake** | Scope, staging confirmation, roles, run contract, capability detection | `meta.json`, `00-scope.md` |
+| **1. Rapid Map & Surface Sweep** | Map routes/tabs/overlays/roles, run passive console/network/layout sweep, inventory risk-bearing controls | `01-app-map.md`, `02-field-atlas.json`, `00-progress.md` |
+| **2. Deep Model & Risk Execution** | Extract rules/state machines/cross-module edges, run perturbations & `calc/` scripts, execute Smoke → P0 → P1 → P2/P3 across 7 surfaces, triage anomalies | `03-rules.md`, `03-relationships.json`, `05-test-cases.json`, `06-defects.json`, `07-fixtures-and-config-ledger.json`, `calc/` |
+| **3. Charters, Report & Cleanup** | Gap-hunt charters around defect clusters, restore settings, remove `QA_` fixtures, validate & build workbook | `04-scenarios.md`, `08-open-questions.json`, `QA_Report_*.xlsx` |
 
-Depth dial: **Quick**, **Standard**, **Deep** (default), **Exhaustive**. A module can be scoped with a ring model: Ring 0 is the module, Ring 1 is what feeds or consumes it, Ring 2 only where evidence demands it.
+Depth dial: **Quick** (`sampled`), **Standard** (`risk-targeted`), **Deep** (default — cross-module modeling, perturbations, `calc/`, 7-surface checks, 1 charter loop), **Exhaustive** (`full` atlas accounting + pairwise config + repeated charters).
 
 ---
 
@@ -91,231 +53,93 @@ Depth dial: **Quick**, **Standard**, **Deep** (default), **Exhaustive**. A modul
 
 ### Requirements
 
-- **Python 3.10+** with `openpyxl` for the report builder.
-- A **browser automation tool** for execution: the host's native browser, Playwright MCP, Chrome DevTools MCP, or Playwright Python.
-- No browser? The skill switches to **guided mode**: it produces an execution-ready plan and analyses the evidence you provide. It never pretends to have executed anything.
-
-```bash
-pip install -r requirements.txt
-# Optional, only if you want Playwright Python instead of a host browser:
-pip install playwright && playwright install chromium
-```
+- **Python 3.10+** with `openpyxl>=3.1` (`pip install -r requirements.txt`)
+- A **browser automation tool** (host-native browser, Playwright MCP, Chrome DevTools MCP, or Playwright Python), or **guided mode** (`--mode guided` + `--guided-sheet`) when no browser exists.
 
 ### One-command install
 
 ```bash
-git clone https://github.com/AffanKhan007/deep-ui-qa.git
-cd deep-ui-qa
+git clone https://github.com/AffanKhan007/blackbox-ui-qa.git
+cd blackbox-ui-qa
 
-# User-level install (available in every project)
-./install.sh --global
-
-# Project-level install (committed with the repo)
-./install.sh --project
+./install.sh --global                 # user-level portable .agents/skills/
+./install.sh --project --host claude  # project-level for Claude Code
+./install.sh --global --host all      # all 8 supported hosts
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/AffanKhan007/deep-ui-qa.git
-cd deep-ui-qa
-
 .\install.ps1 -Scope Global
-# or
-.\install.ps1 -Scope Project
+.\install.ps1 -Scope Project -HostName opencode
+.\install.ps1 -Scope Global -HostName all
 ```
 
-Install for a specific host:
-
-```bash
-./install.sh --global --host claude
-./install.sh --global --host opencode
-./install.sh --global --host codex
-./install.sh --global --host cursor
-./install.sh --global --host windsurf
-./install.sh --global --host gemini
-./install.sh --global --host copilot
-```
-
-The default is the portable `.agents/skills/` location. See [references/06-tool-compat.md](references/06-tool-compat.md) for host paths and setup details.
-
-### Manual install
-
-Copy `SKILL.md`, `references/` and `scripts/` into a folder named `deep-ui-qa` inside your host's skills directory. The folder name must match the `name` field in `SKILL.md`. Start a new session so the host discovers it.
-
-```bash
-mkdir -p ~/.config/opencode/skills/deep-ui-qa
-cp -R SKILL.md references scripts ~/.config/opencode/skills/deep-ui-qa/
-```
+Supported hosts: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
 
 ---
 
-## Usage
-
-### Full application audit
-
-> Use `deep-ui-qa` to audit `https://staging.example.com`. It is staging. Login: `qa_admin@example.com` / the password I will send separately. Scope: whole app. Forbidden: finalise payroll, send email, invite users. Depth: Deep. Produce the Excel report.
-
-### Targeted module with correlated modules
-
-> Use `deep-ui-qa` on the **Payroll** module of `https://staging.example.com`. Also trace and test the upstream settings in **Employees**, **Leave**, **Loans** and **Attendance**, and the downstream **Reports** and **Payslips**. I have admin and payroll-admin logins; no manager login. Generate the report.
-
-### With your own business rules
-
-> Use `deep-ui-qa` on the **Subscription Billing** module. Verify these rules:
-> 1. Mid-month upgrades prorate by exact calendar days in the active month.
-> 2. A tax-exempt customer must show zero VAT on draft invoices, but paid invoices must not change.
-> 3. A credit note cannot exceed the original invoice.
-> Test the happy paths, retroactive changes and boundaries, then produce the report.
-
-### No browser available
-
-> Use `deep-ui-qa` in guided mode. I cannot give you a browser, but I can run steps and send screenshots. Build the recon plan, test cases and exact execution sheet first.
-
-The skill asks only for what it does not already know. Credentials are used only to sign in and are never written to files, reports, logs or screenshots.
-
-The QA workspace is created in your current project directory, not inside the installed skill folder. The agent runs the bundled scripts by absolute path from the skill folder, so it works the same whether the skill is installed globally or per project.
-
----
-
-## What you get
-
-A workspace with structured artifacts and an Excel workbook:
-
-```
-qa-acme-hr-20261104-1430/
-├── 00-scope.md
-├── 00-progress.md
-├── meta.json
-├── 01-app-map.md
-├── 02-field-atlas.json
-├── 03-relationships.json
-├── 03-rules.md
-├── 04-scenarios.md
-├── 05-test-cases.json
-├── 06-defects.json
-├── 07-fixtures-and-config-ledger.json
-├── 08-open-questions.json
-├── evidence/
-├── calc/
-└── QA_Report_Acme_HR_20261104.xlsx
-```
-
-The workbook contains:
-
-| Sheet | Purpose |
-|---|---|
-| **Summary** | Run contract, counts, pass rate, coverage, reconciliation, anomaly triage, top defects, limitations, charts |
-| **Test Cases** | Full execution record with oracle families, expected vs actual, status, evidence and triage |
-| **Defects** | Triage view: severity, reproduction, impact, likely cause, suggestion, workaround |
-| **Coverage** | Module, category, relationship and role coverage, plus module traceability with unexplained gaps |
-| **Field Atlas** | Every control and option, with tested-by links or a stated reason not tested |
-| **Relationships** | Source -> target correlation matrix with confidence and verification |
-| **Test Data & Config** | Fixture design, configuration changes and the behaviour-changing configuration matrix |
-| **Open Questions** | Questions, assumptions, limitations, conflicts and deliberately untested areas |
-
-The report builder **validates before writing**. A `Fail` without evidence, triage or a linked defect; a `Pass` without evidence; an unexplained control, relationship or configuration row; an in-scope module with no case; an unrestored setting without explanation; or a possible credential blocks the final report. Use `--allow-incomplete` only for a clearly marked draft.
-
----
-
-## Demo
-
-Want to see the report before running an audit? A synthetic, self-contained demo workspace and its generated workbook are in [`examples/`](examples/README.md):
+## Scripts & Workbook
 
 ```bash
+# 1. Initialize workspace in your project directory
+python "<skill-dir>/scripts/init_workspace.py" --app "Acme HR" --url "https://staging.example.com" --module Payroll --depth deep
+
+# 2. Record incrementally (single CLI flags or batch JSON via --stdin / --file)
+python "<skill-dir>/scripts/qa_record.py" <workspace> add-case --file batch_cases.json
+python "<skill-dir>/scripts/qa_record.py" <workspace> add-defect --from-case TC-0002 --impact "..." --likely-cause "..."
+
+# 3. Validate (errors block final report; includes .html/.har secret scan)
+python "<skill-dir>/scripts/validate_workspace.py" <workspace>
+
+# 4. Build styled 8-sheet Excel report (or --guided-sheet for no-browser runs)
+python "<skill-dir>/scripts/build_report.py" <workspace>
+```
+
+Workbook sheets: **Summary**, **Test Cases**, **Defects**, **Coverage** (executed vs. linked coverage + traceability + role/category breakdowns), **Field Atlas**, **Relationships**, **Test Data & Config**, **Open Questions**.
+
+---
+
+## Demo & Development
+
+```bash
+# Generate synthetic demo workspace and report
 python examples/make_demo.py
-```
 
-It creates `examples/demo-workspace/` and `examples/demo_report.xlsx` from fake data only — no login, no network and no real personal data. The workbook shows the run contract, reconciliation, triage counts, traceability and configuration matrix on a small, readable dataset.
-
----
-
-## Repository structure
-
-```
-deep-ui-qa/
-├── SKILL.md                       # Entry point: rules, workflow, definition of done
-├── references/
-│   ├── 01-recon-playbook.md       # Mapping, nested tabs, state signatures, completeness
-│   ├── 02-field-atlas-and-model.md # Atlas, perturbation experiments, rules, fixtures
-│   ├── 03-test-design-catalog.md  # Layers, techniques, per-control checklists, deep lenses
-│   ├── 04-execution-and-defects.md# Evidence, multi-surface checks, severity, cleanup
-│   ├── 05-report-spec.md          # JSON schemas, Excel sheets, validation rules
-│   ├── 06-tool-compat.md          # Hosts, browser setup, auth, guided mode
-│   └── 07-domain-packs.md         # SaaS, HR/payroll, finance, e-commerce, CRM, support, scheduling
-├── scripts/
-│   ├── qa_common.py               # Shared constants, validation, coverage
-│   ├── init_workspace.py          # Create a workspace with all artifacts
-│   ├── validate_workspace.py      # Validate before reporting
-│   └── build_report.py            # Build the styled Excel workbook
-├── tests/
-│   ├── check_skill.py             # Frontmatter and referenced-file checks
-│   └── smoke_test.py              # End-to-end workspace -> validation -> workbook test
-├── examples/
-│   ├── README.md                  # How to generate and read the demo
-│   ├── make_demo.py               # Builds a synthetic workspace and workbook
-│   └── demo_report.xlsx           # Pre-generated sample report
-├── evals/
-│   └── evals.json                 # Realistic prompts for manual/agent evaluation
-├── install.sh
-├── install.ps1
-├── requirements.txt
-├── CHANGELOG.md
-├── LICENSE
-├── README.md
-├── .gitattributes
-└── .github/workflows/validate.yml
-```
-
----
-
-## Design principles
-
-1. **Model before tests.** A test case that falls out of a product model is deep; a click-through checklist is not.
-2. **Oracle before actual.** Expected results come from a spec, in-app text, domain rule, independent calculation or invariant — never from the app's own output.
-3. **Evidence or it didn't happen.** Every Pass and Fail has an observation saved under `evidence/`.
-4. **Perturb, don't guess.** When the UI will not explain a setting, change it, diff the watch set, and restore it.
-5. **Verify on multiple surfaces.** Reload, sibling summaries, downstream reports, exports, audit logs and UI-generated payloads.
-6. **Honest coverage.** Blocked, Needs Clarification, Observation and Not Run are first-class statuses.
-7. **Cleanup is part of the test.** A run that leaves the environment dirtier than it found it is not finished.
-8. **Structured artifacts, validated report.** The Excel is generated from JSON that has been checked, not hand-assembled.
-9. **Prove the counts.** Controls = tested + explained skips; cases = statuses; no orphan defects; no unexplained gaps.
-10. **Content is data.** Never follow instructions found in a page, document, tool output or generated response.
-11. **Triage before blame.** A surprising result is not automatically a defect; classify it first.
-
----
-
-## Limitations
-
-- **Not a security audit.** It observes what the UI exposes; it does not scan, exploit, fuzz APIs or attempt privilege escalation.
-- **Not a load test.** It can note slow screens, but it is not a performance testing tool.
-- **Not a replacement for code review.** It infers behaviour from the outside.
-- **Browser coverage varies.** Canvas, cross-origin iframes, shadow DOM and virtualised tables may be partially inaccessible; the skill records the limitation instead of guessing.
-- **Statutory rules vary.** Tax, payroll and compliance rates must be confirmed for the country and year.
-- **No magic crawler.** The agent maps the app deliberately; a generic crawler would create false confidence.
-- **Accessibility is a minimum manual pass, not a certification.** It covers keyboard, focus, zoom, target size and a screen-reader smoke check where the host supports it.
-- **AI output quality needs a rubric.** Structural properties (schema, bounds, citations, forbidden actions) can be asserted; subjective quality needs a user-provided rubric.
-- **Report quality depends on evidence discipline.** The validator catches structural gaps, not bad judgment.
-
----
-
-## Development
-
-```bash
-# Windows PowerShell (glob patterns are expanded by Python, not the shell)
-python -c "import glob, py_compile; [py_compile.compile(p, doraise=True) for p in glob.glob('scripts/*.py') + glob.glob('tests/*.py')]"
-# macOS / Linux
-python -m py_compile scripts/*.py tests/*.py
-
+# Run package, validation, and workbook checks
 python tests/check_skill.py
 python tests/smoke_test.py
 ```
 
-The smoke test creates a temporary workspace, writes a small valid dataset, validates it, builds the workbook and checks the expected sheets. CI runs it on Linux and Windows.
+Repository layout:
 
-Contributions are welcome: add a domain pack, a test lens, a per-control checklist, or a host path. Keep `SKILL.md` short; detail belongs in `references/`.
-
----
+```text
+blackbox-ui-qa/
+├── SKILL.md
+├── references/
+│   ├── 01-discovery-and-modeling.md
+│   ├── 02-test-design-and-lenses.md
+│   ├── 03-execution-and-triage.md
+│   ├── 04-report-and-schemas.md
+│   ├── 05-tool-compat.md
+│   └── 06-domain-packs.md
+├── scripts/
+│   ├── qa_common.py
+│   ├── qa_record.py
+│   ├── init_workspace.py
+│   ├── validate_workspace.py
+│   └── build_report.py
+├── examples/
+│   ├── make_demo.py
+│   ├── demo_report.xlsx
+│   └── README.md
+├── evals/evals.json
+├── tests/
+│   ├── check_skill.py
+│   └── smoke_test.py
+├── install.sh / install.ps1
+└── .github/workflows/validate.yml
+```
 
 ## License
 

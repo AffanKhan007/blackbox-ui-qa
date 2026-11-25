@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Install the deep-ui-qa Agent Skill for a supported host.
+Install the blackbox-ui-qa Agent Skill for supported hosts.
 
 .EXAMPLE
 .\install.ps1 -Scope Global
@@ -18,8 +18,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$SkillName = "deep-ui-qa"
+$SkillName = "blackbox-ui-qa"
 $SrcDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$AllHosts = @("universal", "claude", "opencode", "codex", "cursor", "windsurf", "gemini", "copilot")
 
 function Get-Destination {
     param([string]$AgentHost)
@@ -52,23 +53,23 @@ function Install-One {
     param([string]$AgentHost)
 
     $dest = Get-Destination -AgentHost $AgentHost
-    New-Item -ItemType Directory -Force -Path (Join-Path $dest "references") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $dest "scripts") | Out-Null
+    $refDest = Join-Path $dest "references"
+    $scriptDest = Join-Path $dest "scripts"
+
+    if (Test-Path $refDest) { Remove-Item -Path $refDest -Recurse -Force }
+    if (Test-Path $scriptDest) { Remove-Item -Path $scriptDest -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $refDest | Out-Null
+    New-Item -ItemType Directory -Force -Path $scriptDest | Out-Null
 
     Copy-Item -Path (Join-Path $SrcDir "SKILL.md") -Destination (Join-Path $dest "SKILL.md") -Force
-    Copy-Item -Path (Join-Path $SrcDir "references\*") -Destination (Join-Path $dest "references") -Recurse -Force
-    Copy-Item -Path (Join-Path $SrcDir "scripts\*") -Destination (Join-Path $dest "scripts") -Recurse -Force
-
-    if (Test-Path (Join-Path $SrcDir "assets")) {
-        New-Item -ItemType Directory -Force -Path (Join-Path $dest "assets") | Out-Null
-        Copy-Item -Path (Join-Path $SrcDir "assets\*") -Destination (Join-Path $dest "assets") -Recurse -Force
-    }
+    Copy-Item -Path (Join-Path $SrcDir "references\*.md") -Destination $refDest -Force
+    Copy-Item -Path (Join-Path $SrcDir "scripts\*.py") -Destination $scriptDest -Force
 
     Write-Host "[+] Installed $SkillName -> $dest"
 }
 
 if ($HostName -eq "all") {
-    foreach ($h in @("universal", "claude", "opencode", "codex", "cursor")) {
+    foreach ($h in $AllHosts) {
         Install-One -AgentHost $h
     }
 } else {
@@ -77,7 +78,7 @@ if ($HostName -eq "all") {
 
 Write-Host ""
 Write-Host "[OK] Installed. Start a new agent session so the skill is discovered."
-Write-Host '     Then ask: "Use deep-ui-qa to audit https://staging.example.com ..."'
+Write-Host '     Then ask: "Use blackbox-ui-qa to audit https://staging.example.com ..."'
 Write-Host ""
 Write-Host "Requirements:"
 Write-Host "  Python 3.10+ and openpyxl:   pip install openpyxl"
