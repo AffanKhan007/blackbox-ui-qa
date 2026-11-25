@@ -8,6 +8,7 @@ venv/
 # QA workspaces and reports (generated locally)
 qa-*/
 examples/demo-workspace/
+launch-kit/
 *.xlsx
 !examples/*.xlsx
 

@@ -6,11 +6,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](requirements.txt)
+[![Live Sample Report](https://img.shields.io/badge/Live_Demo-Sample_Report-2F5597)](https://affankhan007.github.io/blackbox-ui-qa/)
 [![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf_%7C_Gemini_%7C_Copilot-548235)](#installation)
+
+**[View Live Sample Report](https://affankhan007.github.io/blackbox-ui-qa/)** · **[Changelog](CHANGELOG.md)** · **[Sample Deliverables](examples/README.md)** · **[Adversarial QA Gym](evals/gym/server.py)**
 
 When source code is unavailable, generic AI "QA" turns into shallow button-clicking that misses math errors, reload data loss, async search races, and direct-URL permission bypasses—or floods you with false alarms.
 
-`blackbox-ui-qa` gives your agent a disciplined black-box methodology, a deterministic browser telemetry sensor, optional millisecond-precision Playwright probes, a strict evidence & secret-scan validator, and three ready-to-ship deliverables. See [CHANGELOG.md](CHANGELOG.md) for release history.
+`blackbox-ui-qa` gives your agent a disciplined black-box methodology, a deterministic browser telemetry sensor, optional millisecond-precision Playwright probes, a strict evidence & secret-scan validator, and three ready-to-ship deliverables.
+
+---
+
+## Verified Benchmark Scorecard (`evals/gym/`)
+
+Measured against our self-contained, zero-dependency 11-bug + 2-trap [Adversarial QA Gym](evals/gym/server.py) and graded automatically with [`evals/score_gym_run.py`](evals/score_gym_run.py):
+
+| Run Configuration | Scope | Planted-Bug Recall | False-Positive Traps | Validation & Secret Scan | Cleanup |
+|---|---|---|---|---|---|
+| **Restricted Webview** (`js_eval: false`) | 8-bug baseline | `7 / 8` (`87.5%`) | `0` violations | `0` errors | Restored & clean |
+| **`pw_probe.py` + `browser_probes.js` + `ingest`** | 8-bug baseline | **`8 / 8` (`100.0%`)** in `24.13s` | **`0` violations** | **`0` errors** | Restored & clean |
+| **Full SPA/AI Gym Suite (`v2.1.0`)** | **11 bugs** (incl. `409` rollback, `?tab=` deep-link, SSE citation) | **`11 / 11` (`100.0%`)** in `36.0s` | **`0` violations** | **`0` errors** | Restored & clean |
 
 ---
 
@@ -27,9 +42,44 @@ When source code is unavailable, generic AI "QA" turns into shallow button-click
 
 ---
 
+## Installation
+
+### One-Line Universal Install (`npx skills`)
+
+Compatible with the Agent Skills specification ([`SKILL.md`](SKILL.md)):
+
+```bash
+npx skills add AffanKhan007/blackbox-ui-qa
+```
+
+### Manual Install (`install.sh` / `install.ps1`)
+
+**Prerequisites:** Python `3.10+` with `openpyxl>=3.1` (`pip install -r requirements.txt`), plus a browser automation tool (host-native browser, Playwright MCP, Chrome DevTools MCP, or optional `pip install playwright && playwright install chromium`), or Guided Mode without a browser.
+
+```bash
+git clone https://github.com/AffanKhan007/blackbox-ui-qa.git
+cd blackbox-ui-qa
+
+./install.sh --global                 # portable ~/.agents/skills/blackbox-ui-qa
+./install.sh --project --host claude  # project-local .claude/skills/blackbox-ui-qa
+./install.sh --global --host all      # install to all 8 supported hosts
+```
+
+Windows PowerShell:
+
+```powershell
+.\install.ps1 -Scope Global
+.\install.ps1 -Scope Project -HostName opencode
+.\install.ps1 -Scope Global -HostName all
+```
+
+Supported `--host` / `-HostName` targets: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
+
+---
+
 ## How to Use It
 
-Once [installed](#installation), prompt your AI agent normally—it handles workspace creation, browser probing, recording, validation, and report generation automatically.
+Once installed, prompt your AI agent normally—it handles workspace creation, browser probing, recording, validation, and report generation automatically.
 
 ### Example Prompts
 
@@ -69,44 +119,17 @@ flowchart LR
 
 ---
 
-## Deliverables
+## Deliverables & Live Preview
 
 Every validated run outputs three synchronized artifacts (or an interactive Excel runbook in `--guided-sheet` mode):
 
-1. **`QA_Report_<app>_<timestamp>.xlsx`** — Styled 8-sheet workbook (`Summary` with charts & reconciliation, `Test Cases`, `Defects`, `Coverage` including *Journey, invariant & multi-surface persistence* and *Technique* tables, `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`).
-2. **`REPORT.html`** — Zero-dependency, XSS-escaped interactive HTML report with KPI cards, live Module/Status/Severity/text filters, collapsible defect tickets, and inline screenshot previews.
-3. **`DEFECTS.md`** — Severity-sorted (`Critical` → `Enhancement`), copy-pasteable GitHub/Jira/Linear defect tickets complete with reproduction steps, linked test-case oracles, expected vs. actual, impact, and evidence paths.
+1. **`REPORT.html`** — Zero-dependency, XSS-escaped interactive HTML report with KPI cards, live Module/Status/Severity/text filters, collapsible defect tickets, and inline screenshot previews ([View Live Sample Report](https://affankhan007.github.io/blackbox-ui-qa/)).
+2. **`DEFECTS.md`** — Severity-sorted (`Critical` → `Enhancement`), copy-pasteable GitHub/Jira/Linear defect tickets complete with reproduction steps, linked test-case oracles, expected vs. actual, impact, and evidence paths.
+3. **`QA_Report_<app>_<timestamp>.xlsx`** — Styled 8-sheet workbook (`Summary` with charts & reconciliation, `Test Cases`, `Defects`, `Coverage` including *Journey, invariant & multi-surface persistence* and *Technique* tables, `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`).
 
-Inspect sample generated outputs in [`examples/`](examples/README.md): [`demo_report.xlsx`](examples/demo_report.xlsx), [`REPORT.html`](examples/REPORT.html), and [`DEFECTS.md`](examples/DEFECTS.md).
+![Interactive HTML Report Preview](assets/report-preview.png)
 
----
-
-## Installation
-
-### Prerequisites
-- **Python 3.10+** with `openpyxl>=3.1` (`pip install -r requirements.txt`)
-- A **browser automation tool** (host-native browser, Playwright MCP, Chrome DevTools MCP, or optional `playwright` Python: `pip install playwright && playwright install chromium`), or **Guided Mode** when no browser is available.
-
-### One-Command Install
-
-**macOS / Linux:**
-```bash
-git clone https://github.com/AffanKhan007/blackbox-ui-qa.git
-cd blackbox-ui-qa
-
-./install.sh --global                 # portable ~/.agents/skills/blackbox-ui-qa
-./install.sh --project --host claude  # project-local .claude/skills/blackbox-ui-qa
-./install.sh --global --host all      # install to all 8 supported hosts
-```
-
-**Windows PowerShell:**
-```powershell
-.\install.ps1 -Scope Global
-.\install.ps1 -Scope Project -HostName opencode
-.\install.ps1 -Scope Global -HostName all
-```
-
-Supported `--host` / `-HostName` targets: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
+Inspect tracked sample outputs in [`examples/`](examples/README.md): [`demo_report.xlsx`](examples/demo_report.xlsx), [`REPORT.html`](examples/REPORT.html), and [`DEFECTS.md`](examples/DEFECTS.md). To regenerate the demo walkthrough video (`assets/demo.webm`) or render `demo.gif` / `demo.mp4`, run [`assets/record_demo.py`](assets/record_demo.py).
 
 ---
 
@@ -144,35 +167,19 @@ python scripts/qa_diff.py <baseline_ws> <current_ws>
 
 ---
 
-## Adversarial QA Gym & Benchmarks
+## Adversarial QA Gym & Development
 
-`blackbox-ui-qa` includes a self-contained, zero-dependency local web app ([`evals/gym/server.py`](evals/gym/server.py)) and automated grader ([`evals/score_gym_run.py`](evals/score_gym_run.py)) to benchmark agents without touching external sites.
+Run the offline 11-bug + 2-trap gym locally or execute the full test suite:
 
 ```bash
-# Start local mini-SaaS gym (11 planted bugs + 2 false-positive traps)
+# Start local mini-SaaS gym and grade a completed run
 python evals/gym/server.py --port 8765
-
-# Grade a completed workspace against evals/gym/ground_truth.json
 python evals/score_gym_run.py <workspace> --json
-```
 
-### What the Gym Tests
-- **11 planted real bugs:** tax-before-discount rounding error, broken cross-module settings toggle, frontend-only save lost on reload, async search race + duplicate submit, direct-URL RBAC bypass, vanishing 1.5s toast + HTTP 200 GraphQL error, mobile `390x844` overflow & clipped button, indirect prompt-injection ticket content, optimistic UI `HTTP 409` rollback failure, SPA `?tab=` deep-link filter loss, and SSE AI streaming citation hallucination.
-- **2 false-positive traps:** ambiguous `"Loyalty points apply to eligible orders"` copy (`Needs Clarification`) and cosmetic `State` vs. `Status` label drift (`Observation`).
-
-### Observed Benchmark Results
-- **Restricted webview (`js_eval: false`) on 8-bug baseline:** `7/8` (`87.5%` recall), `0` false-positive trap violations, `0` validation errors (interactive click timing missed the 30ms async search race).
-- **Playwright accelerator (`pw_probe.py` + `browser_probes.js`) + `ingest` on 8-bug baseline:** `8/8` (`100.0%` recall in `24.13s`), `1` atomic `ingest` call (`33` IDs), `0` trap violations, `0` validation/secret errors.
-- **Current 11-bug SPA/AI suite:** Verified end-to-end in [`tests/smoke_test.py`](tests/smoke_test.py) (`11/11` grader match + live Playwright verification of `HTTP 409` optimistic rollback, `?tab=confirmed` reload loss, and non-hanging SSE stream inspection).
-
----
-
-## Development & Repository Layout
-
-```bash
-python examples/make_demo.py    # Regenerate demo report, DEFECTS.md, and REPORT.html
-python tests/check_skill.py     # Validate SKILL.md, references, installers, and version parity
-python tests/smoke_test.py      # Run end-to-end validation, report, diff, and live Gym tests
+# Regenerate demo & run package/smoke tests
+python examples/make_demo.py
+python tests/check_skill.py
+python tests/smoke_test.py
 ```
 
 ```text
@@ -194,6 +201,8 @@ blackbox-ui-qa/
 │   ├── validate_workspace.py            # Workspace & secret-scan gate
 │   ├── build_report.py                  # Generates .xlsx, DEFECTS.md, REPORT.html & guided sheet
 │   └── qa_diff.py                       # Release-over-release regression diff
+├── docs/index.html                      # Self-contained GitHub Pages live sample report
+├── assets/                              # Social preview banner, report preview & demo capture script
 ├── examples/                            # Synthetic demo generator & sample deliverables
 ├── evals/                               # Eval prompts, offline Adversarial QA Gym & grader
 ├── tests/                               # Package integrity & end-to-end smoke suite
