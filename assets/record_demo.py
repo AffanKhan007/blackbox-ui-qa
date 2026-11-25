@@ -106,6 +106,46 @@ BANNER_HTML = """<!doctype html>
 """
 
 
+INTRO_SLATE_HTML = """<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+    color: #0f172a;
+    display: flex; flex-direction: column; justify-content: center; gap: 22px;
+    padding: 56px 72px;
+  }
+  .tag { display:inline-block; width:fit-content; background:#1f3864; color:#fff; padding:6px 14px; border-radius:999px; font-size:14px; font-weight:700; }
+  h1 { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; color: #0f172a; }
+  .term {
+    background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 24px 28px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 17px; line-height: 1.65;
+    box-shadow: 0 12px 30px rgba(15,23,42,0.12);
+  }
+  .cmd { color: #93c5fd; }
+  .ok { color: #86efac; font-weight: 700; }
+  .sub { font-size: 20px; color: #334155; }
+</style>
+</head>
+<body>
+  <div class="tag">blackbox-ui-qa &middot; Live Walkthrough</div>
+  <h1>Probing the 11-Bug Adversarial QA Gym</h1>
+  <p class="sub">1. Run deterministic probes &rarr; 2. Catch live UI/network/AI bugs &rarr; 3. Inspect interactive <code>REPORT.html</code></p>
+  <div class="term">
+    <div><span class="cmd">$ python scripts/pw_probe.py qa-gym sweep / race-search / authz-url</span></div>
+    <div><span class="cmd">$ python scripts/qa_record.py qa-gym ingest --stdin</span> &nbsp;&rarr; <span class="ok">42 artifacts recorded</span></div>
+    <div><span class="cmd">$ python evals/score_gym_run.py qa-gym</span> &nbsp;&rarr; <span class="ok">11/11 Recall (100%) &middot; 0 False Positives</span></div>
+  </div>
+</body>
+</html>
+"""
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -152,40 +192,43 @@ def main() -> int:
             )
             vp = ctx_v.new_page()
             try:
+                vp.set_content(INTRO_SLATE_HTML)
+                vp.wait_for_timeout(2400)
+
                 vp.goto(f"{base_url}/login", wait_until="domcontentloaded")
-                vp.wait_for_timeout(800)
+                vp.wait_for_timeout(600)
                 vp.fill('input[name="username"]', "admin")
                 vp.fill('input[name="password"]', "qa-admin-password")
                 vp.click('button[type="submit"]')
                 vp.wait_for_load_state("domcontentloaded")
-                vp.wait_for_timeout(900)
+                vp.wait_for_timeout(800)
 
                 # Trigger vanishing toast + GraphQL error on /orders
                 vp.click("#reserve-btn")
-                vp.wait_for_timeout(1200)
+                vp.wait_for_timeout(1100)
 
                 # Visit /orders/detail?id=1 and trigger optimistic 409 toggle
                 vp.goto(f"{base_url}/orders/detail?id=1", wait_until="domcontentloaded")
-                vp.wait_for_timeout(800)
+                vp.wait_for_timeout(700)
                 vp.check("#priority-toggle")
-                vp.wait_for_timeout(900)
+                vp.wait_for_timeout(800)
 
                 # Visit /copilot and stream SSE answer
                 vp.goto(f"{base_url}/copilot", wait_until="domcontentloaded")
-                vp.wait_for_timeout(700)
+                vp.wait_for_timeout(600)
                 vp.click("#copilot-ask")
-                vp.wait_for_timeout(1200)
+                vp.wait_for_timeout(1100)
 
                 # Open generated live sample report and filter defects
                 if DOCS_HTML.is_file():
                     vp.goto(DOCS_HTML.as_uri(), wait_until="load")
-                    vp.wait_for_timeout(1200)
+                    vp.wait_for_timeout(1100)
                     vp.select_option("#q-sev", "critical")
                     vp.wait_for_timeout(1000)
                     vp.select_option("#q-sev", "")
-                    vp.wait_for_timeout(700)
+                    vp.wait_for_timeout(600)
                     vp.evaluate("window.scrollTo({top: 520, behavior: 'smooth'})")
-                    vp.wait_for_timeout(1400)
+                    vp.wait_for_timeout(1500)
             finally:
                 video = vp.video
                 ctx_v.close()
