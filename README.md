@@ -1,138 +1,184 @@
 # Blackbox UI QA
 
-**Adversarial, model-driven black-box QA for any web app you can only reach through the UI.**
+**Turn any coding agent into an adversarial, evidence-backed QA engineer for web apps you can only test through the UI.**
 
-[![Agent Skills](https://img.shields.io/badge/Agent_Skills-SKILL.md-1F3864)](https://agentskills.io)
+[![Agent Skills](https://img.shields.io/badge/Agent_Skills-SKILL.md-1F3864)](SKILL.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](https://www.python.org/)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](requirements.txt)
 [![Works with](https://img.shields.io/badge/Works_with-Claude_Code_%7C_OpenCode_%7C_Codex_%7C_Cursor_%7C_Windsurf_%7C_Gemini_%7C_Copilot-548235)](#installation)
 
-`blackbox-ui-qa` turns an AI agent into a sharp black-box QA team for **UI-only** testing across enterprise SaaS/ERP/HRMS platforms, modern reactive SPAs, transactional checkouts, legacy iframe/Shadow-DOM portals, and AI-assisted UIs.
+When source code is unavailable, generic AI "QA" turns into shallow button-clicking that misses math errors, reload data loss, async search races, and direct-URL permission bypasses—or floods you with false alarms.
 
-Instead of drowning in waterfall spreadsheets or shallow "click every button" checklists, it maps the application, probes causal settings and cross-module ripples, verifies calculations outside the app, hunts async races and broken permissions in a live browser, and produces a validated Excel report.
-
----
-
-## What's new in 2.1.0
-
-- **Deterministic Browser Telemetry & WCAG Sensor (`scripts/browser_probes.js`):** Zero-dependency, secret-redacting, SSE-safe probe capturing `console.error`, `pageerror`, `unhandledrejection`, `fetch`/XHR `>=400`, GraphQL HTTP 200 `errors`, vanishing 1–2s toasts, overflow, obscured/clipped buttons, `<24x24px` tap targets, and unlabeled controls.
-- **Developer-Ready `DEFECTS.md`, Visual `REPORT.html` & Cross-Run Diff (`scripts/qa_diff.py`):** `build_report.py` writes copy-pasteable tickets in `DEFECTS.md` and an interactive self-contained `REPORT.html` (with inline screenshot previews) alongside `QA_Report_*.xlsx`; `qa_diff.py` compares two runs for regressions and coverage deltas.
-- **Full Lifecycle CLI, One-Shot `ingest` & Optional Playwright Accelerator:** `qa_record.py` adds `ingest`, `set-meta`, `update-*`, and `import-guided`; optional [`scripts/pw_probe.py`](scripts/pw_probe.py) runs deterministic async-race, double-submit, reload, AuthZ, and multi-viewport sweeps with `browser_probes.js` injected via `addInitScript`.
-- **Offline Adversarial QA Gym (`evals/gym/`):** Self-contained Python stdlib mini-SaaS target (`evals/gym/server.py`) with 11 planted bugs (including optimistic UI `409` rollback, SPA deep-link state loss, and SSE AI streaming citation hallucination), 2 false-positive traps, and `evals/score_gym_run.py` automated grading.
-- **Journey & Persistence Coverage:** `Coverage` workbook tab now reports `Journey, invariant & multi-surface persistence` and `Coverage by technique / risk strategy` alongside module/relationship/role metrics.
-
-## What's new in 2.0.0
-
-- **Risk-Driven 3-Stage Loop (replacing waterfall paralysis):** Rapid Map & Surface Health Sweep → Deep Model & Interleaved Risk Execution → Second-Look Charters, Report & Cleanup. High-risk flows are tested early instead of stalling behind thousands of decorative UI-chrome atlas rows.
-- **Protected Deep Rigor:** `Deep` and `Exhaustive` runs preserve Ring 0/1 cross-module modeling, single-factor perturbation experiments, independent `calc/*.py` verification, and 7-surface persistence checks.
-- **Universal Web & SPA Coverage:** Explicit lenses and copy-ready JS probes for optimistic UI rollback, out-of-order async search races, SPA deep-link/history state, transient 2-second toast traps, Shadow DOM/portal inspection, broken assets/layout geometry, and `networkidle`-safe waiting on streaming/WebSocket apps.
-- **Atomic CLI Recording (`scripts/qa_record.py`):** Supports both CLI flags and PowerShell-safe `--stdin` / `--file` batch JSON with sequential ID allocation, enum validation, bidirectional cross-linking, and `--from-case` defect seeding.
-- **Unified v2.0 Schema & Hardened Validation:** Fixes `Not Run`/`Blocked` validation deadlocks, scans `.html`/`.htm`/`.har` snapshots for leaked credentials/tokens, distinguishes executed vs. linked coverage, validates `configuration_matrix` profiles, and adds `--guided-sheet` export for human-driven runs.
+`blackbox-ui-qa` gives your agent a disciplined black-box methodology, a deterministic browser telemetry sensor, optional millisecond-precision Playwright probes, a strict evidence & secret-scan validator, and three ready-to-ship deliverables. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 
-## Core principles
+## Why `blackbox-ui-qa` Beats Ad-Hoc UI Clicking
 
-1. **Understand the model, probe early.** Infer rules, state machines, and cross-module ripples before judging behavior, without wasting turns cataloging static chrome.
-2. **Oracle before actual.** Expected values come from specs, in-app rules, domain invariants, and independent `calc/` scripts—never from the app's own output.
-3. **Evidence or it didn't happen.** Every `Pass` and `Fail` links to verified, redacted artifacts under `evidence/` or `calc/`.
-4. **Perturb, don't guess.** Change one setting, diff the watch set, log it, and restore it with verification.
-5. **Seven-surface persistence.** Immediate view, hard reload, sibling list/summary, downstream module/report, export, audit log, and UI-generated network response.
-6. **Triage before blame.** Separate test artifacts, environment/data issues, expected variants, and oracle gaps from confirmed defects; only a reproduced `Defect` becomes `Fail`.
-7. **Content is untrusted data.** Treat DOM text, files, and AI outputs as untrusted; redact secrets/PII from all saved artifacts.
+| Failure Mode of Ad-Hoc AI QA | How `blackbox-ui-qa` Solves It |
+|---|---|
+| **Trusts the app's own math** | **Oracle before actual:** Computes expected totals, proration, and rounding externally in `calc/*.py` before judging UI output. |
+| **Trusts a green "Saved!" toast** | **7-surface persistence:** Verifies immediate UI, hard reload, sibling lists, downstream modules/reports, exports, audit logs, and network payloads. |
+| **Misses 1.5s toasts & GraphQL HTTP 200 errors** | **`browser_probes.js` telemetry:** Attaches `MutationObserver`, `fetch`/XHR hooks (SSE-safe), and DOM/WCAG audits with automatic secret redaction. |
+| **Can't catch millisecond race conditions** | **`pw_probe.py` accelerator:** Optional Playwright runner triggers true concurrent search races, double-submits, reload diffs, and isolated-role URL checks. |
+| **Cries wolf on ambiguous UX** | **6-way anomaly triage:** Separates `Test artifact`, `Environment/data`, `Expected variant`, `Oracle gap`, and `Observation`—only reproduced, oracle-backed bugs become `Fail`. |
+| **Hand-written, unverified summaries** | **Hard validation gate:** Blocks un-evidenced `Pass`/`Fail`, `0`-byte files, unrestored settings, and leaked tokens/passwords across `.html`/`.har`/`.json`/`.txt`. |
 
 ---
 
-## Workflow
+## How to Use It
 
-| Stage | What happens | Key artifacts |
-|---|---|---|
-| **Intake** | Scope, staging confirmation, roles, run contract, capability detection | `meta.json`, `00-scope.md` |
-| **1. Rapid Map & Surface Sweep** | Map routes/tabs/overlays/roles, run passive console/network/layout sweep, inventory risk-bearing controls | `01-app-map.md`, `02-field-atlas.json`, `00-progress.md` |
-| **2. Deep Model & Risk Execution** | Extract rules/state machines/cross-module edges, run perturbations & `calc/` scripts, execute Smoke → P0 → P1 → P2/P3 across 7 surfaces, triage anomalies | `03-rules.md`, `03-relationships.json`, `05-test-cases.json`, `06-defects.json`, `07-fixtures-and-config-ledger.json`, `calc/` |
-| **3. Charters, Report & Cleanup** | Gap-hunt charters around defect clusters, restore settings, remove `QA_` fixtures, validate & build workbook | `04-scenarios.md`, `08-open-questions.json`, `QA_Report_*.xlsx` |
+Once [installed](#installation), prompt your AI agent normally—it handles workspace creation, browser probing, recording, validation, and report generation automatically.
 
-Depth dial: **Quick** (`sampled`), **Standard** (`risk-targeted`), **Deep** (default — cross-module modeling, perturbations, `calc/`, 7-surface checks, 1 charter loop), **Exhaustive** (`full` atlas accounting + pairwise config + repeated charters).
+### Example Prompts
+
+**1. Deep Staging Audit (SaaS / ERP / Billing)**
+> Use `blackbox-ui-qa` to audit our staging app at `https://staging.example.com` (staging confirmed). Logins: Admin (`admin@test.com` / `...`) and Viewer (`viewer@test.com` / `...`). Scope: Orders, Settings, and Billing. Forbidden: do not send real emails or delete non-`QA_` records. Depth: Deep.
+
+**2. Modern SPA & AI Copilot Audit**
+> Run `blackbox-ui-qa` on `https://staging.board.example` (staging confirmed). Focus on optimistic toggle rollbacks on 4xx/5xx, live search races, deep-linked `?tab=` URLs across reload, mobile `390x844` layout, and AI Copilot SSE streaming + citation grounding + prompt-injection boundaries.
+
+**3. Guided Mode (No Browser Tool Available)**
+> Use `blackbox-ui-qa` in guided mode (`--mode guided`) for `https://staging.portal.example`. Attached are 2 screenshots and a note that PDF export ignored date filters last month. Produce an execution runbook without fabricating results.
+
+### Depth Modes
+
+| Depth | Rigor & Coverage |
+|---|---|
+| **`Quick`** | Navigation map, passive error/layout sweep, smoke + top P0 risks (`sampled` atlas). |
+| **`Standard`** | Full navigation map, risk-targeted controls, interleaved P0/P1 flows, multi-role checks. |
+| **`Deep`** *(default)* | `Standard` **plus** Ring 0/1 cross-module modeling, single-factor config perturbations (logged & restored), external `calc/*.py` math checks, 7-surface persistence, `configuration_matrix`, and 1 chartered gap-hunt loop. |
+| **`Exhaustive`** | `Deep` **plus** `full` atlas accounting (every control tested or explained), pairwise config interactions, and repeated gap-hunt loops until dry. |
+
+---
+
+## Architecture & 3-Stage Workflow
+
+```mermaid
+flowchart LR
+    Intake["Intake & Safety Gate\n(meta.json, staging_confirmed)"] --> S1["Stage 1: Rapid Map & Sweep\n(browser_probes.js, 01-app-map.md)"]
+    S1 --> S2["Stage 2: Model & Risk Execution\n(perturbations, calc/*.py, pw_probe.py)"]
+    S2 --> Rec["Atomic Recording\n(qa_record.py ingest / CLI)"]
+    Rec --> Val["Hard Validation Gate\n(validate_workspace.py + scan_secrets)"]
+    Val --> Out["build_report.py"]
+    Out --> Xlsx["QA_Report_*.xlsx\n(8 tabs + charts)"]
+    Out --> Html["REPORT.html\n(interactive + screenshots)"]
+    Out --> Md["DEFECTS.md\n(copy-paste tickets)"]
+```
+
+---
+
+## Deliverables
+
+Every validated run outputs three synchronized artifacts (or an interactive Excel runbook in `--guided-sheet` mode):
+
+1. **`QA_Report_<app>_<timestamp>.xlsx`** — Styled 8-sheet workbook (`Summary` with charts & reconciliation, `Test Cases`, `Defects`, `Coverage` including *Journey, invariant & multi-surface persistence* and *Technique* tables, `Field Atlas`, `Relationships`, `Test Data & Config`, `Open Questions`).
+2. **`REPORT.html`** — Zero-dependency, XSS-escaped interactive HTML report with KPI cards, live Module/Status/Severity/text filters, collapsible defect tickets, and inline screenshot previews.
+3. **`DEFECTS.md`** — Severity-sorted (`Critical` → `Enhancement`), copy-pasteable GitHub/Jira/Linear defect tickets complete with reproduction steps, linked test-case oracles, expected vs. actual, impact, and evidence paths.
+
+Inspect sample generated outputs in [`examples/`](examples/README.md): [`demo_report.xlsx`](examples/demo_report.xlsx), [`REPORT.html`](examples/REPORT.html), and [`DEFECTS.md`](examples/DEFECTS.md).
 
 ---
 
 ## Installation
 
-### Requirements
-
+### Prerequisites
 - **Python 3.10+** with `openpyxl>=3.1` (`pip install -r requirements.txt`)
-- A **browser automation tool** (host-native browser, Playwright MCP, Chrome DevTools MCP, or Playwright Python), or **guided mode** (`--mode guided` + `--guided-sheet`) when no browser exists.
+- A **browser automation tool** (host-native browser, Playwright MCP, Chrome DevTools MCP, or optional `playwright` Python: `pip install playwright && playwright install chromium`), or **Guided Mode** when no browser is available.
 
-### One-command install
+### One-Command Install
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/AffanKhan007/blackbox-ui-qa.git
 cd blackbox-ui-qa
 
-./install.sh --global                 # user-level portable .agents/skills/
-./install.sh --project --host claude  # project-level for Claude Code
-./install.sh --global --host all      # all 8 supported hosts
+./install.sh --global                 # portable ~/.agents/skills/blackbox-ui-qa
+./install.sh --project --host claude  # project-local .claude/skills/blackbox-ui-qa
+./install.sh --global --host all      # install to all 8 supported hosts
 ```
 
-Windows PowerShell:
-
+**Windows PowerShell:**
 ```powershell
 .\install.ps1 -Scope Global
 .\install.ps1 -Scope Project -HostName opencode
 .\install.ps1 -Scope Global -HostName all
 ```
 
-Supported hosts: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
+Supported `--host` / `-HostName` targets: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
 
 ---
 
-## Scripts & Workbook
+## CLI Quick Reference
+
+All workspace scripts live under `scripts/` (`init_workspace.py`, `qa_record.py`, `validate_workspace.py`, and `qa_diff.py` are pure Python stdlib):
 
 ```bash
-# 1. Initialize workspace in your project directory
-python "<skill-dir>/scripts/init_workspace.py" --app "Acme HR" --url "https://staging.example.com" --module Payroll --depth deep
+# 1. Initialize workspace (local qa-* folders are gitignored)
+python scripts/init_workspace.py --app "Acme HR" --url "https://staging.example.com" --module Payroll --depth deep
 
-# 2. Record incrementally (single CLI flags or batch JSON via --stdin / --file)
-python "<skill-dir>/scripts/qa_record.py" <workspace> add-case --file batch_cases.json
-python "<skill-dir>/scripts/qa_record.py" <workspace> add-defect --from-case TC-0002 --impact "..." --likely-cause "..."
+# 2. Optional deterministic Playwright probes (injects browser_probes.js via addInitScript)
+python scripts/pw_probe.py <ws> sweep --login-url <url>/login --user admin --password "..." --url <url>/orders
+python scripts/pw_probe.py <ws> race-search --url <url>/orders --selector "#order-search" --query-a alpha --query-b beta
+python scripts/pw_probe.py <ws> double-submit --url <url>/orders --fill 'input[name="customer"]=QA_DBL' --submit-selector "#create-order-btn"
+python scripts/pw_probe.py <ws> reload-check --url <url>/orders/detail?id=1 --fill "#note-input=QA_NOTE" --submit-selector '#note-form button[type="submit"]' --watch-selector "#note-display"
+python scripts/pw_probe.py <ws> authz-url --login-url <url>/login --user viewer --password "..." --role viewer --target-url <url>/orders/edit?id=1
 
-# 3. Validate (errors block final report; includes .html/.har secret scan)
-python "<skill-dir>/scripts/validate_workspace.py" <workspace>
+# 3. Record atomically (one-shot ingest bundle OR incremental subcommands)
+python scripts/qa_record.py <ws> ingest --file bundle.json
+python scripts/qa_record.py <ws> set-meta --staging-confirmed true --role admin --role viewer
+python scripts/qa_record.py <ws> add-defect --from-case TC-0002 --impact "..." --likely-cause "... (hypothesis)"
 
-# 4. Build styled 8-sheet Excel report + DEFECTS.md (or --guided-sheet for no-browser runs)
-python "<skill-dir>/scripts/build_report.py" <workspace>
+# 4. Validate (blocks missing/0-byte evidence, bad refs, unrestored configs, and secrets)
+python scripts/validate_workspace.py <ws> --strict
 
-# 5. Optional: import filled guided sheet or diff two runs
-python "<skill-dir>/scripts/qa_record.py" <workspace> import-guided --file Guided_Execution.xlsx
-python "<skill-dir>/scripts/qa_diff.py" <baseline_ws> <current_ws>
+# 5. Build deliverables (.xlsx + DEFECTS.md + REPORT.html) or guided sheet round-trip
+python scripts/build_report.py <ws>
+python scripts/build_report.py <ws> --guided-sheet
+python scripts/qa_record.py <ws> import-guided --file Guided_Execution_acme-hr.xlsx
+
+# 6. Compare two runs across releases
+python scripts/qa_diff.py <baseline_ws> <current_ws>
 ```
 
-Workbook sheets: **Summary**, **Test Cases**, **Defects**, **Coverage** (executed vs. linked coverage + traceability + role/category breakdowns), **Field Atlas**, **Relationships**, **Test Data & Config**, **Open Questions**.
-
 ---
 
-## Demo, Adversarial Gym & Development
+## Adversarial QA Gym & Benchmarks
+
+`blackbox-ui-qa` includes a self-contained, zero-dependency local web app ([`evals/gym/server.py`](evals/gym/server.py)) and automated grader ([`evals/score_gym_run.py`](evals/score_gym_run.py)) to benchmark agents without touching external sites.
 
 ```bash
-# Generate synthetic demo workspace and report
-python examples/make_demo.py
-
-# Launch offline Adversarial QA Gym (11 planted bugs + 2 false-positive traps)
+# Start local mini-SaaS gym (11 planted bugs + 2 false-positive traps)
 python evals/gym/server.py --port 8765
-python evals/score_gym_run.py <workspace>
 
-# Run package, validation, and workbook checks
-python tests/check_skill.py
-python tests/smoke_test.py
+# Grade a completed workspace against evals/gym/ground_truth.json
+python evals/score_gym_run.py <workspace> --json
 ```
 
-Repository layout:
+### What the Gym Tests
+- **11 planted real bugs:** tax-before-discount rounding error, broken cross-module settings toggle, frontend-only save lost on reload, async search race + duplicate submit, direct-URL RBAC bypass, vanishing 1.5s toast + HTTP 200 GraphQL error, mobile `390x844` overflow & clipped button, indirect prompt-injection ticket content, optimistic UI `HTTP 409` rollback failure, SPA `?tab=` deep-link filter loss, and SSE AI streaming citation hallucination.
+- **2 false-positive traps:** ambiguous `"Loyalty points apply to eligible orders"` copy (`Needs Clarification`) and cosmetic `State` vs. `Status` label drift (`Observation`).
+
+### Observed Benchmark Results
+- **Restricted webview (`js_eval: false`) on 8-bug baseline:** `7/8` (`87.5%` recall), `0` false-positive trap violations, `0` validation errors (interactive click timing missed the 30ms async search race).
+- **Playwright accelerator (`pw_probe.py` + `browser_probes.js`) + `ingest` on 8-bug baseline:** `8/8` (`100.0%` recall in `24.13s`), `1` atomic `ingest` call (`33` IDs), `0` trap violations, `0` validation/secret errors.
+- **Current 11-bug SPA/AI suite:** Verified end-to-end in [`tests/smoke_test.py`](tests/smoke_test.py) (`11/11` grader match + live Playwright verification of `HTTP 409` optimistic rollback, `?tab=confirmed` reload loss, and non-hanging SSE stream inspection).
+
+---
+
+## Development & Repository Layout
+
+```bash
+python examples/make_demo.py    # Regenerate demo report, DEFECTS.md, and REPORT.html
+python tests/check_skill.py     # Validate SKILL.md, references, installers, and version parity
+python tests/smoke_test.py      # Run end-to-end validation, report, diff, and live Gym tests
+```
 
 ```text
 blackbox-ui-qa/
-├── SKILL.md
-├── references/
+├── SKILL.md                             # Core skill instructions & 3-stage loop
+├── references/                          # Progressive-disclosure playbooks (loaded per stage)
 │   ├── 01-discovery-and-modeling.md
 │   ├── 02-test-design-and-lenses.md
 │   ├── 03-execution-and-triage.md
@@ -140,31 +186,21 @@ blackbox-ui-qa/
 │   ├── 05-tool-compat.md
 │   └── 06-domain-packs.md
 ├── scripts/
-│   ├── browser_probes.js
-│   ├── pw_probe.py
-│   ├── qa_common.py
-│   ├── qa_record.py
-│   ├── init_workspace.py
-│   ├── validate_workspace.py
-│   ├── build_report.py
-│   └── qa_diff.py
-├── examples/
-│   ├── make_demo.py
-│   ├── demo_report.xlsx
-│   └── README.md
-├── evals/
-│   ├── evals.json
-│   ├── score_gym_run.py
-│   └── gym/
-│       ├── server.py
-│       └── ground_truth.json
-├── tests/
-│   ├── check_skill.py
-│   └── smoke_test.py
-├── install.sh / install.ps1
-└── .github/workflows/validate.yml
+│   ├── browser_probes.js                # Idempotent, SSE-safe telemetry & WCAG/layout probe
+│   ├── pw_probe.py                      # Optional deterministic Playwright accelerator
+│   ├── qa_common.py                     # Stdlib schema, validation, redaction & coverage kernel
+│   ├── qa_record.py                     # Atomic CLI & one-shot JSON ingest / guided importer
+│   ├── init_workspace.py                # Workspace scaffolder
+│   ├── validate_workspace.py            # Workspace & secret-scan gate
+│   ├── build_report.py                  # Generates .xlsx, DEFECTS.md, REPORT.html & guided sheet
+│   └── qa_diff.py                       # Release-over-release regression diff
+├── examples/                            # Synthetic demo generator & sample deliverables
+├── evals/                               # Eval prompts, offline Adversarial QA Gym & grader
+├── tests/                               # Package integrity & end-to-end smoke suite
+├── install.sh / install.ps1             # Cross-platform installers for 8 agent hosts
+└── .github/workflows/validate.yml       # Ubuntu/Windows × Python 3.10–3.12 + Node JS check
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
