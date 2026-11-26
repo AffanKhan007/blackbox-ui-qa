@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from qa_common import SCHEMA_VERSION, now_iso, slugify
+from qa_common import SCHEMA_VERSION, configure_utf8_stdio, now_iso, slugify
 
 SCOPE_TEMPLATE = """# QA scope & domain rules
 
@@ -145,7 +145,8 @@ def write_json(path: Path, data: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create a blackbox-ui-qa v2.0 workspace.")
+    configure_utf8_stdio()
+    parser = argparse.ArgumentParser(description="Create a blackbox-ui-qa workspace.")
     parser.add_argument("--app", required=True, help="Application name")
     parser.add_argument("--url", default="", help="Application URL")
     parser.add_argument("--module", action="append", default=[], help="In-scope module (repeatable)")

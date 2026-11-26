@@ -36,15 +36,16 @@ Apps with WebSockets, SSE streams, analytics heartbeats, or AI token streams **n
 When `capabilities.js_eval` is `true`, inject [`scripts/browser_probes.js`](../scripts/browser_probes.js) once per page via Playwright `page.addInitScript(path="<skill-dir>/scripts/browser_probes.js")`—or evaluate its contents in MCP/DevTools `evaluate` (it is idempotent via `window.__QA_TELEMETRY_INSTALLED__`, skips SSE/binary streams so streaming UIs never hang, and redacts `Authorization`/cookies/tokens/passwords before buffering):
 
 - **`window.__QA_DRAIN__()`:** Pops buffered `consoleErrors`, `pageErrors`, `unhandledRejections`, `networkFailures` (`status >= 400` or network errors on `fetch`/XHR), `graphqlErrors` (HTTP `200` JSON payloads with top-level `errors`), and transient `toasts` (captured via `MutationObserver` before 1–2s auto-dismiss). Call after every state transition or save/delete action.
-- **`window.__QA_AUDIT__()`:** Returns a read-only DOM & WCAG 2.2 AA snapshot: `overflowX` (`scrollWidth > innerWidth`), `brokenImages`, `unlabeledInputs`, `unlabeledClickables`, `smallTargets` (`< 24x24px`), `obscuredOrClipped` (`elementFromPoint` / offscreen checks), `duplicateIds`, and `focusedObscured`.
+- **`window.__QA_AUDIT__()`:** Returns a read-only DOM & WCAG 2.2 AA snapshot: `overflowX` (`scrollWidth > innerWidth`), `brokenImages`, `unlabeledInputs`, `unlabeledClickables`, `smallTargets` (`< 24x24px`, excluding inline prose links), `obscuredOrClipped` (`elementFromPoint` / offscreen checks), `duplicateIds`, and `focusedObscured`.
 - **`window.__QA_TELEMETRY__`:** Inspect full current ring buffer without draining.
 
 ### Optional Playwright Probe Runner (`scripts/pw_probe.py`)
 When `playwright` is available, [`scripts/pw_probe.py`](../scripts/pw_probe.py) provides deterministic sub-second execution with automatic `addInitScript(browser_probes.js)` injection, `authorized_origins` & `staging_confirmed` safety checks, `--storage-state` support (enforcing paths strictly outside `<workspace>` per Rule 5), and secret redaction:
 - `save-auth`: Logs in once and writes Playwright `storage_state` to an OS temp path outside `<workspace>` (`--out /tmp/qa_admin.json`).
-- `exec`: Executes a declarative multi-step JSON sequence (`goto`, `fill`, `click`, `select`, `check`, `press`, `wait`, `wait_for`, `reload`, `screenshot`, `assert_text`, `assert_visible`, `assert_url`, `audit`) via `--stdin`/`--file`.
+- `exec`: Executes a declarative multi-step JSON sequence (`goto`, `fill`, `click`, `select`, `check`, `press`, `wait`, `wait_stable`, `wait_for`, `reload`, `screenshot`, `assert_text`, `assert_visible`, `assert_url`, `assert_clean`, `audit`) via `--stdin`/`--file`.
+- `deeplink-check`: Activates a tab/filter or opens a query/hash URL, hard-reloads, and verifies whether URL params and view content survive reload.
 - `a11y-keyboard`: Runs automated `Tab` traversal (`--tabs 25`) checking visible focus indicators, sticky-header focus obscuration (WCAG 2.2 SC 2.4.11), focus traps, and `Escape` dialog dismissal (`--dialog-trigger`).
-- `sweep`: Multi-viewport (`1440x900`, `390x844`) screenshot + `__QA_DRAIN__()` + `__QA_AUDIT__()` evidence capture.
+- `sweep`: Multi-viewport (`1440x900`, `390x844`) query/fragment-safe screenshot + `__QA_DRAIN__()` + `__QA_AUDIT__()` evidence capture.
 - `race-search`: Fires back-to-back search queries (`--delay-ms 30`) to catch out-of-order async races.
 - `double-submit`: Rapid double-click submit (`no_wait_after=True`) to verify idempotency.
 - `reload-check`: Submits a mutation, hard-reloads, and verifies server persistence vs. frontend-only state loss.

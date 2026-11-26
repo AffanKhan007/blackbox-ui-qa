@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Atomic incremental JSON recorder for blackbox-ui-qa v2.0 workspaces.
+"""Atomic incremental JSON recorder for blackbox-ui-qa workspaces.
 
 Supports both single-record CLI flags and batch JSON input (--stdin or --file)
 to eliminate PowerShell escaping traps and reduce hand-editing of large JSON files.
@@ -12,7 +12,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from qa_common import (
     ATLAS_COVERAGE_MODES,
@@ -34,6 +34,7 @@ from qa_common import (
     TRIAGE_DISPOSITIONS,
     as_list,
     as_text,
+    configure_utf8_stdio,
     merge_meta_patch,
     now_iso,
     read_json,
@@ -839,136 +840,124 @@ def cmd_set_meta(workspace: Path, args: argparse.Namespace) -> list[str]:
     return ["meta.json"]
 
 
-def cmd_update_defect(workspace: Path, args: argparse.Namespace) -> list[str]:
-    path = workspace / "06-defects.json"
-    doc = _load_doc(path, {"defects": []})
-    by_id = {as_text(d.get("id")): d for d in doc["defects"] if isinstance(d, dict) and as_text(d.get("id"))}
+def _update_records(
+    path: Path,
+    collection_key: str,
+    kind_label: str,
+    args: argparse.Namespace,
+    validate_fn: Callable[[dict], None],
+    apply_cli_fn: Callable[[dict, argparse.Namespace], None],
+    *,
+    default_doc: dict | None = None,
+) -> list[str]:
+    doc = _load_doc(path, default_doc or {collection_key: []})
+    by_id = {as_text(r.get("id")): r for r in doc[collection_key] if isinstance(r, dict) and as_text(r.get("id"))}
     patches = _read_batch_payload(args)
     updated: list[str] = []
     if patches is not None:
         for patch in patches:
-            did = as_text(patch.get("id")) or as_text(args.id)
-            if not did:
-                raise SystemExit("ERROR: update-defect JSON payload requires 'id'.")
-            target = by_id.get(did)
+            rid = as_text(patch.get("id")) or as_text(args.id)
+            if not rid:
+                raise SystemExit(f"ERROR: {args.command} JSON payload requires 'id'.")
+            target = by_id.get(rid)
             if target is None:
-                raise SystemExit(f"ERROR: Defect '{did}' not found.")
+                raise SystemExit(f"ERROR: {kind_label} '{rid}' not found.")
             target.update(patch)
-            target["id"] = did
-            _validate_enum(as_text(target.get("severity")), SEVERITIES, "severity")
-            _validate_enum(as_text(target.get("type")), DEFECT_TYPES, "defect type")
-            _validate_enum(as_text(target.get("status") or "Open"), DEFECT_STATUSES, "defect status")
-            updated.append(did)
+            target["id"] = rid
+            validate_fn(target)
+            updated.append(rid)
     else:
         if not args.id:
-            raise SystemExit("ERROR: update-defect requires --id when not using --stdin/--file.")
+            raise SystemExit(f"ERROR: {args.command} requires --id when not using --stdin/--file.")
         target = by_id.get(args.id)
         if target is None:
-            raise SystemExit(f"ERROR: Defect '{args.id}' not found.")
-        if args.status:
-            _validate_enum(args.status, DEFECT_STATUSES, "defect status")
-            target["status"] = args.status
-        if args.severity:
-            _validate_enum(args.severity, SEVERITIES, "severity")
-            target["severity"] = args.severity
-        if args.notes is not None:
-            target["notes"] = args.notes
-        if args.workaround is not None:
-            target["workaround"] = args.workaround
-        if args.impact is not None:
-            target["impact"] = args.impact
-        if args.likely_cause is not None:
-            target["likely_cause"] = args.likely_cause
-        if args.suggestion is not None:
-            target["suggestion"] = args.suggestion
+            raise SystemExit(f"ERROR: {kind_label} '{args.id}' not found.")
+        apply_cli_fn(target, args)
+        validate_fn(target)
         updated.append(args.id)
-
     write_json_atomic(path, doc)
     return updated
+
+
+def _validate_defect_patch(target: dict) -> None:
+    _validate_enum(as_text(target.get("severity")), SEVERITIES, "severity")
+    _validate_enum(as_text(target.get("type")), DEFECT_TYPES, "defect type")
+    _validate_enum(as_text(target.get("status") or "Open"), DEFECT_STATUSES, "defect status")
+
+
+def _apply_defect_cli(target: dict, args: argparse.Namespace) -> None:
+    if args.status:
+        target["status"] = args.status
+    if args.severity:
+        target["severity"] = args.severity
+    for field in ("notes", "workaround", "impact", "likely_cause", "suggestion"):
+        val = getattr(args, field, None)
+        if val is not None:
+            target[field] = val
+
+
+def cmd_update_defect(workspace: Path, args: argparse.Namespace) -> list[str]:
+    return _update_records(
+        workspace / "06-defects.json",
+        "defects",
+        "Defect",
+        args,
+        _validate_defect_patch,
+        _apply_defect_cli,
+    )
+
+
+def _validate_fixture_patch(target: dict) -> None:
+    if target.get("design"):
+        _validate_enum(as_text(target.get("design")), FIXTURE_DESIGNS, "fixture design")
+
+
+def _apply_fixture_cli(target: dict, args: argparse.Namespace) -> None:
+    for field in ("status", "cleanup", "notes", "purpose"):
+        val = getattr(args, field, None)
+        if val is not None:
+            target[field] = val
+    if args.design:
+        target["design"] = args.design
 
 
 def cmd_update_fixture(workspace: Path, args: argparse.Namespace) -> list[str]:
-    path = workspace / "07-fixtures-and-config-ledger.json"
-    doc = _load_doc(path, {"fixtures": [], "config_changes": [], "configuration_matrix": []})
-    by_id = {as_text(f.get("id")): f for f in doc["fixtures"] if isinstance(f, dict) and as_text(f.get("id"))}
-    patches = _read_batch_payload(args)
-    updated: list[str] = []
-    if patches is not None:
-        for patch in patches:
-            fid = as_text(patch.get("id")) or as_text(args.id)
-            if not fid:
-                raise SystemExit("ERROR: update-fixture JSON payload requires 'id'.")
-            target = by_id.get(fid)
-            if target is None:
-                raise SystemExit(f"ERROR: Fixture '{fid}' not found.")
-            target.update(patch)
-            target["id"] = fid
-            if target.get("design"):
-                _validate_enum(as_text(target.get("design")), FIXTURE_DESIGNS, "fixture design")
-            updated.append(fid)
-    else:
-        if not args.id:
-            raise SystemExit("ERROR: update-fixture requires --id when not using --stdin/--file.")
-        target = by_id.get(args.id)
-        if target is None:
-            raise SystemExit(f"ERROR: Fixture '{args.id}' not found.")
-        if args.status is not None:
-            target["status"] = args.status
-        if args.cleanup is not None:
-            target["cleanup"] = args.cleanup
-        if args.notes is not None:
-            target["notes"] = args.notes
-        if args.purpose is not None:
-            target["purpose"] = args.purpose
-        if args.design:
-            _validate_enum(args.design, FIXTURE_DESIGNS, "fixture design")
-            target["design"] = args.design
-        updated.append(args.id)
+    return _update_records(
+        workspace / "07-fixtures-and-config-ledger.json",
+        "fixtures",
+        "Fixture",
+        args,
+        _validate_fixture_patch,
+        _apply_fixture_cli,
+        default_doc={"fixtures": [], "config_changes": [], "configuration_matrix": []},
+    )
 
-    write_json_atomic(path, doc)
-    return updated
+
+def _validate_question_patch(target: dict) -> None:
+    _validate_enum(as_text(target.get("type")), QUESTION_TYPES, "question type")
+    _validate_enum(as_text(target.get("status") or "Open"), QUESTION_STATUSES, "question status")
+
+
+def _apply_question_cli(target: dict, args: argparse.Namespace) -> None:
+    if args.status:
+        target["status"] = args.status
+    for field in ("impact", "owner", "description"):
+        val = getattr(args, field, None)
+        if val is not None:
+            target[field] = val
+    if args.related:
+        target["related"] = list(args.related)
 
 
 def cmd_update_question(workspace: Path, args: argparse.Namespace) -> list[str]:
-    path = workspace / "08-open-questions.json"
-    doc = _load_doc(path, {"items": []})
-    by_id = {as_text(q.get("id")): q for q in doc["items"] if isinstance(q, dict) and as_text(q.get("id"))}
-    patches = _read_batch_payload(args)
-    updated: list[str] = []
-    if patches is not None:
-        for patch in patches:
-            qid = as_text(patch.get("id")) or as_text(args.id)
-            if not qid:
-                raise SystemExit("ERROR: update-question JSON payload requires 'id'.")
-            target = by_id.get(qid)
-            if target is None:
-                raise SystemExit(f"ERROR: Question '{qid}' not found.")
-            target.update(patch)
-            target["id"] = qid
-            _validate_enum(as_text(target.get("type")), QUESTION_TYPES, "question type")
-            _validate_enum(as_text(target.get("status") or "Open"), QUESTION_STATUSES, "question status")
-            updated.append(qid)
-    else:
-        if not args.id:
-            raise SystemExit("ERROR: update-question requires --id when not using --stdin/--file.")
-        target = by_id.get(args.id)
-        if target is None:
-            raise SystemExit(f"ERROR: Question '{args.id}' not found.")
-        if args.status:
-            _validate_enum(args.status, QUESTION_STATUSES, "question status")
-            target["status"] = args.status
-        if args.impact is not None:
-            target["impact"] = args.impact
-        if args.owner is not None:
-            target["owner"] = args.owner
-        if args.description is not None:
-            target["description"] = args.description
-        if args.related:
-            target["related"] = list(args.related)
-        updated.append(args.id)
-
-    write_json_atomic(path, doc)
-    return updated
+    return _update_records(
+        workspace / "08-open-questions.json",
+        "items",
+        "Question",
+        args,
+        _validate_question_patch,
+        _apply_question_cli,
+    )
 
 
 def cmd_import_guided(workspace: Path, args: argparse.Namespace) -> list[str]:
@@ -1236,7 +1225,7 @@ def _add_batch_flags(p: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Atomically record items in a blackbox-ui-qa v2.0 workspace.")
+    parser = argparse.ArgumentParser(description="Atomically record items in a blackbox-ui-qa workspace.")
     parser.add_argument("workspace", help="Workspace directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1472,6 +1461,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
     workspace = Path(args.workspace).expanduser().resolve()

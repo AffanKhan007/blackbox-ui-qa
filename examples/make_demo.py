@@ -10,8 +10,10 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +39,25 @@ def write_json(path: Path, data: dict) -> None:
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
+
+
+def write_tiny_png(path: Path, rgba: tuple[int, int, int, int] = (180, 35, 24, 255)) -> None:
+    """Write a valid 16x16 solid PNG using stdlib zlib/struct (no Pillow dependency)."""
+    w, h = 16, 16
+    row = b"\x00" + bytes(rgba) * w
+    raw = row * h
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack("!I", len(data)) + tag + data + struct.pack("!I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack("!IIBBBBB", w, h, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png)
 
 
 def prepare(workspace: Path) -> None:
@@ -172,6 +193,7 @@ def populate(workspace: Path) -> None:
     }
     for relative, text in evidence.items():
         write_text(workspace / relative, text)
+    write_tiny_png(workspace / "evidence/screenshots/TC-0002.png")
 
     record_batch(
         workspace,
@@ -304,7 +326,7 @@ def populate(workspace: Path) -> None:
                 "surfaces_checked": ["immediate", "reload", "list"],
                 "correlated_modules": ["Customers"],
                 "atlas_ids": ["A-0002"],
-                "evidence": ["evidence/snapshots/TC-0002.txt"],
+                "evidence": ["evidence/snapshots/TC-0002.txt", "evidence/screenshots/TC-0002.png"],
                 "suggestion": "Enforce minimum >= 1 server-side and display inline error.",
                 "notes": "Reproduced twice from clean state.",
                 "triage": {

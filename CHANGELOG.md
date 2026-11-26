@@ -2,6 +2,12 @@
 
 All notable changes to `blackbox-ui-qa` are documented here.
 
+## [2.3.0] — 2026-11-26
+
+- **Higher Bug-Finding Precision & Lower Noise (`scripts/pw_probe.py`, `scripts/browser_probes.js`):** Added `deeplink-check` for SPA query/hash state survival across reload, query/fragment-safe `sweep` evidence naming (no overwrites across `?tab=` routes), `wait_stable` (SSE/WebSocket-safe settle) + `assert_clean` actions in `exec`, and deduplicated browser session lifecycle (`_probe_session`). Updated `window.__QA_AUDIT__()` to exempt inline prose links from `<24x24px` target warnings (WCAG 2.2 SC 2.5.8) and `<label>` hit-tests from `obscuredOrClipped`.
+- **Self-Contained `REPORT.html`, Cross-Platform UTF-8 & Zero-False-Positive Secret Scan (`scripts/build_report.py`, `scripts/qa_common.py`, `scripts/qa_record.py`):** `build_report.py` now base64-inlines local image evidence (`<= 1 MB`) directly into `REPORT.html` so shared reports keep working screenshot previews offline; added `configure_utf8_stdio()` across all CLI tools to prevent Windows `cp1252` `--stdin` failures; exempted common UI/validation status words (`required`, `invalid`, `masked`, etc.) in `SECRET_PLACEHOLDERS` to eliminate false-positive `possible_secret` blocks on legitimate test notes; unified `update-defect` / `update-fixture` / `update-question` patch loops.
+- **High-Conversion `README.md`, Studio Preview & CI Parity:** Brought interactive report preview (`assets/report-preview.png`) above the fold, streamlined install + prompt + collapsible CLI reference, synced dynamic version rendering in `assets/record_demo.py`, added synthetic PNG preview to `examples/make_demo.py`, and tightened `tests/check_skill.py`, `tests/smoke_test.py`, and `.github/workflows/validate.yml`.
+
 ## [2.2.0] — 2026-11-25
 
 - **Hardened Secret Scanning & Redaction (`scripts/qa_common.py`, `scripts/browser_probes.js`):** Added detection and redaction for raw un-prefixed JWTs (`eyJ...`), Slack tokens (`xox[baprs]-...`), and Stripe live keys (`sk_live_` / `rk_live_`), plus active-focus obscuration (`focusedObscured`) inside `window.__QA_AUDIT__()`.

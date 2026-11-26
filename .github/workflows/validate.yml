@@ -30,7 +30,7 @@ jobs:
 
       - name: Compile scripts and syntax-check JS probes
         run: |
-          python -m py_compile scripts/qa_common.py scripts/qa_record.py scripts/init_workspace.py scripts/validate_workspace.py scripts/build_report.py scripts/qa_diff.py scripts/pw_probe.py evals/gym/server.py evals/score_gym_run.py tests/check_skill.py tests/smoke_test.py examples/make_demo.py
+          python -m compileall -q scripts evals tests examples assets
           node --check scripts/browser_probes.js
 
       - name: Check skill package

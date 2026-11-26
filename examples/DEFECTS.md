@@ -35,3 +35,4 @@
 
 **Evidence:**
 - `evidence/snapshots/TC-0002.txt`
+- `evidence/screenshots/TC-0002.png`

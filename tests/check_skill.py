@@ -92,9 +92,16 @@ def main() -> int:
             if not (ROOT / "references" / fname).exists():
                 fail(f"{ref_file.name} references non-existent file '{fname}'")
 
-    for relative in sorted(set(re.findall(r"scripts/[A-Za-z0-9_.-]+\.(?:py|js)", text))):
+    for relative in sorted(set(re.findall(r"scripts/[A-Za-z0-9_.-]+\.(?:py|js)", text + "\n" + readme_text))):
         if not (ROOT / relative).exists():
             fail(f"referenced script does not exist: {relative}")
+
+    for _label, target in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", readme_text):
+        if target.startswith(("http://", "https://", "#")):
+            continue
+        clean_target = target.split("#", 1)[0]
+        if clean_target and not (ROOT / clean_target).exists():
+            fail(f"README.md broken relative link: {target}")
 
     for required in [
         "README.md",
@@ -103,6 +110,8 @@ def main() -> int:
         "install.sh",
         "install.ps1",
         "requirements.txt",
+        "examples/DEFECTS.md",
+        "examples/REPORT.html",
         "scripts/browser_probes.js",
         "scripts/pw_probe.py",
         "scripts/qa_diff.py",

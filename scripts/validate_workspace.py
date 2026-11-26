@@ -8,11 +8,12 @@ import json
 import sys
 from pathlib import Path
 
-from qa_common import coverage, load_workspace, validate_workspace
+from qa_common import configure_utf8_stdio, coverage, load_workspace, validate_workspace
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate a blackbox-ui-qa v2.0 workspace.")
+    configure_utf8_stdio()
+    parser = argparse.ArgumentParser(description="Validate a blackbox-ui-qa workspace.")
     parser.add_argument("workspace", help="Workspace directory")
     parser.add_argument("--json", action="store_true", help="Print issues and stats as JSON")
     parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")

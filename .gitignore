@@ -9,6 +9,7 @@ venv/
 qa-*/
 examples/demo-workspace/
 launch-kit/
+GROWTH_PLAN.md
 *.xlsx
 !examples/*.xlsx
 

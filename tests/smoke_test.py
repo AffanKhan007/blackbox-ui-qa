@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
@@ -103,7 +104,6 @@ def populate_valid_deep(workspace: Path) -> None:
 
     for rel, content in {
         "evidence/screenshots/TC-0001.png": "png\n",
-        "evidence/screenshots/TC-0002.png": "png\n",
         "evidence/screenshots/TC-0003.png": "png\n",
         "evidence/snapshots/TC-0004.html": "<html><body>Snapshot ok</body></html>\n",
         "evidence/network/TC-0002.json": '{"deduction": 4800}\n',
@@ -114,6 +114,8 @@ def populate_valid_deep(workspace: Path) -> None:
         p = workspace / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
+    tiny_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+    (workspace / "evidence/screenshots/TC-0002.png").write_bytes(tiny_png)
 
     # Controls: 3 controls, 1 unlinked (allowed in Deep risk-targeted mode!)
     record(
@@ -433,6 +435,7 @@ def main() -> int:
         assert html_report.is_file(), "REPORT.html should be generated beside report.xlsx"
         html_text = html_report.read_text(encoding="utf-8")
         assert "Blackbox UI QA Report" in html_text and "[DEF-0001]" in html_text
+        assert "data:image/png;base64," in html_text, "REPORT.html should inline local PNG screenshot previews"
 
         # Test qa_record.py ingest one-shot multi-artifact ingestion (with auto_seed_defects)
         ingest_ws = Path(temp) / "ingest-ws"
@@ -464,7 +467,7 @@ def main() -> int:
                         "category": "Business Rules & Calculation",
                         "technique": "Invariant",
                         "priority": "P0",
-                        "reason": "Verify ingest + HTML escaping",
+                        "reason": "Verify ingest + UTF-8 — → + HTML escaping",
                         "role": "Admin",
                         "steps": ["Open Billing."],
                         "oracle": {"type": "Calculation", "source": "calc/TC-0001.py", "confidence": "High"},
@@ -487,6 +490,8 @@ def main() -> int:
         assert run(str(SCRIPTS / "build_report.py"), str(ingest_ws)).returncode == 0
         ingest_html = (ingest_ws / "REPORT.html").read_text(encoding="utf-8")
         assert "&lt;script&gt;alert" in ingest_html and "<script>alert('xss')</script>" not in ingest_html
+        ingest_cases_raw = (ingest_ws / "05-test-cases.json").read_text(encoding="utf-8")
+        assert "UTF-8 — →" in ingest_cases_raw
 
         # Test new qa_record.py lifecycle subcommands + batch restore-config + import-guided
         res = run(
@@ -604,6 +609,15 @@ def main() -> int:
         errs = json.loads(res.stdout)["errors"]
         assert any("jwt_token" in e["message"] for e in errs), errs
         assert any("slack_token" in e["message"] for e in errs), errs
+
+        # Negative 3b: Benign QA notes ("password: invalid", "secret: masked") must NOT trigger false-positive secret blocks
+        reset()
+        (workspace / "evidence/snapshots/safe_notes.txt").write_text(
+            "Observed validation copy: password: invalid and secret: masked in table.\n",
+            encoding="utf-8",
+        )
+        safe_res = run(str(SCRIPTS / "validate_workspace.py"), str(workspace), "--strict")
+        assert safe_res.returncode == 0, safe_res.stdout + safe_res.stderr
 
         # Negative 4: Missing evidence file and path traversal are errors
         reset()
@@ -803,8 +817,10 @@ def main() -> int:
                     "out_prefix": "exec_smoke",
                     "steps": [
                         {"action": "goto", "url": f"{base_url}/orders"},
+                        {"action": "wait_stable"},
                         {"action": "assert_text", "selector": "#orders-tbody", "contains": "Acme Retail"},
                         {"action": "screenshot", "name": "exec_orders"},
+                        {"action": "assert_clean"},
                         {"action": "audit"},
                     ],
                 }
@@ -818,6 +834,26 @@ def main() -> int:
                 ex_json = json.loads(ex_proc.stdout)
                 assert ex_json["ok"] is True and "focusedObscured" in ex_json["audit"], ex_json
                 assert (pw_ws / "evidence/screenshots/exec_orders.png").is_file()
+
+                # Deeplink-check catches BUG-10 (?tab=confirmed URL persists while rows reset on reload)
+                dl_res = run(
+                    str(SCRIPTS / "pw_probe.py"),
+                    str(pw_ws),
+                    "deeplink-check",
+                    "--storage-state",
+                    str(admin_state),
+                    "--url",
+                    f"{base_url}/orders",
+                    "--click",
+                    'button[data-tab="confirmed"]',
+                    "--expected-url-part",
+                    "tab=confirmed",
+                    "--watch-selector",
+                    "#orders-tbody",
+                )
+                assert dl_res.returncode == 0, dl_res.stderr
+                dl_json = json.loads(dl_res.stdout)
+                assert dl_json["url_preserved"] is True and dl_json["text_preserved"] is False, dl_json
 
                 ak_res = run(
                     str(SCRIPTS / "pw_probe.py"),
@@ -834,7 +870,7 @@ def main() -> int:
                 ak_json = json.loads(ak_res.stdout)
                 assert ak_json["unique_focus_targets"] >= 1, ak_json
 
-                # Sweep mobile + desktop viewports with browser_probes.js addInitScript
+                # Sweep mobile + desktop viewports and query-distinct URLs without overwriting files
                 sw_res = run(
                     str(SCRIPTS / "pw_probe.py"),
                     str(pw_ws),
@@ -846,7 +882,9 @@ def main() -> int:
                     "--password",
                     "qa-admin-password",
                     "--url",
-                    f"{base_url}/orders",
+                    f"{base_url}/orders?tab=draft",
+                    "--url",
+                    f"{base_url}/orders?tab=confirmed",
                     "--viewport",
                     "1440x900",
                     "--viewport",
@@ -854,6 +892,7 @@ def main() -> int:
                 )
                 assert sw_res.returncode == 0, sw_res.stderr
                 sw_json = json.loads(sw_res.stdout)
+                assert len(sw_json["results"]) == 4 and sw_json["results"][0]["screenshot"] != sw_json["results"][2]["screenshot"]
                 mobile_rec = next(r for r in sw_json["results"] if r["viewport"] == "390x844")
                 assert mobile_rec["audit"]["overflowX"] is True, mobile_rec
                 assert (pw_ws / mobile_rec["screenshot"]).is_file()
@@ -1099,7 +1138,7 @@ def main() -> int:
         assert dwb["Summary"]["E9"].value == "1440x900; 390x844"
         assert (demo_xlsx.parent / "DEFECTS.md").is_file()
 
-    print("All v2.0 smoke tests passed.")
+    print("All blackbox-ui-qa smoke tests passed.")
     return 0
 
 

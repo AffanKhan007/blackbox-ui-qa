@@ -9,6 +9,7 @@ Optional GIF/MP4 conversion once recorded:
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import tempfile
@@ -18,6 +19,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = Path(__file__).resolve().parent
 DOCS_HTML = ROOT / "docs" / "index.html"
+
+
+def _read_skill_version() -> str:
+    skill_md = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    m = re.search(r'^\s*version:\s*"?([0-9]+\.[0-9]+\.[0-9]+)"?', skill_md, re.MULTILINE)
+    return m.group(1) if m else "2.3.0"
+
+
+SKILL_VERSION = _read_skill_version()
 
 sys.path.insert(0, str(ROOT / "evals" / "gym"))
 import server as gym_server  # type: ignore
@@ -71,7 +81,7 @@ BANNER_HTML = """<!doctype html>
 </head>
 <body>
   <div class="top">
-    <div class="pill">Agent Skill &middot; v2.1.0 &middot; MIT</div>
+    <div class="pill">Agent Skill &middot; v__VERSION__ &middot; MIT</div>
     <div class="gym-badge">11/11 Gym Recall &middot; 0 False Positives</div>
   </div>
 
@@ -164,7 +174,7 @@ def main() -> int:
         # 1. Render 1280x640 GitHub Social Preview banner
         ctx = browser.new_context(viewport={"width": 1280, "height": 640}, device_scale_factor=1)
         page = ctx.new_page()
-        page.set_content(BANNER_HTML)
+        page.set_content(BANNER_HTML.replace("__VERSION__", SKILL_VERSION))
         page.screenshot(path=str(banner_path))
         ctx.close()
 

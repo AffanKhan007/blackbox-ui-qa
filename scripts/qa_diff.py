@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from qa_common import as_text, coverage, load_workspace
+from qa_common import as_text, configure_utf8_stdio, coverage, load_workspace
 
 
 def _index_by_key(records: list[dict], fields: tuple[str, ...]) -> dict[tuple[str, ...], dict]:
@@ -99,7 +99,8 @@ def diff_workspaces(baseline_dir: Path, current_dir: Path) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Diff two blackbox-ui-qa v2.0 workspaces.")
+    configure_utf8_stdio()
+    parser = argparse.ArgumentParser(description="Diff two blackbox-ui-qa workspaces.")
     parser.add_argument("baseline", help="Baseline workspace directory")
     parser.add_argument("current", help="Current workspace directory")
     parser.add_argument("--json", action="store_true", help="Output JSON diff")

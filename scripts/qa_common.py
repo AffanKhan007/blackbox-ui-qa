@@ -1,4 +1,4 @@
-"""Shared constants, loading, validation and coverage helpers for blackbox-ui-qa v2.0.
+"""Shared constants, loading, validation and coverage helpers for blackbox-ui-qa.
 
 This module is intentionally dependency-free (standard library only) so workspace
 initialization, recording, and validation work before openpyxl is installed.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -179,6 +180,16 @@ ARTIFACTS = {
     "configuration_matrix": ("07-fixtures-and-config-ledger.json", "configuration_matrix"),
     "questions": ("08-open-questions.json", "items"),
 }
+
+
+def configure_utf8_stdio() -> None:
+    """Reconfigure standard streams to UTF-8 so piped JSON never fails on Windows cp1252."""
+    for stream, err_mode in ((sys.stdin, "strict"), (sys.stdout, "replace"), (sys.stderr, "replace")):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors=err_mode)
+            except Exception:
+                pass
 
 
 def now_iso() -> str:
@@ -505,6 +516,29 @@ SECRET_PLACEHOLDERS = (
     "none",
     "null",
     "test-only",
+    "true",
+    "false",
+    "boolean",
+    "string",
+    "number",
+    "required",
+    "optional",
+    "invalid",
+    "valid",
+    "missing",
+    "empty",
+    "blank",
+    "hidden",
+    "masked",
+    "visible",
+    "unchanged",
+    "accepted",
+    "rejected",
+    "short",
+    "weak",
+    "mismatch",
+    "disabled",
+    "enabled",
 )
 
 

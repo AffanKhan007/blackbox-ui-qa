@@ -337,7 +337,9 @@
       if ((tag === 'button' || tag === 'a' || el.getAttribute('role') === 'button') && !hasAccessibleName(el)) {
         unlabeledClickables.push(el.id || el.className || tag);
       }
-      if (rect.width < 24 || rect.height < 24) {
+      const inProse = tag === 'a' && Boolean(el.closest('p, li, td, th, dd, dt, blockquote, figcaption'));
+      const isInlineLink = inProse && getComputedStyle(el).display === 'inline';
+      if (!isInlineLink && (rect.width < 24 || rect.height < 24)) {
         smallTargets.push({ label, width: Math.round(rect.width), height: Math.round(rect.height) });
       }
       if (rect.right > window.innerWidth + 1 || rect.left < -1) {
@@ -346,7 +348,9 @@
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
         const hit = document.elementFromPoint(cx, cy);
-        if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
+        const ownLabel = el.closest('label');
+        const hitInOwnLabel = Boolean(ownLabel && hit && (hit === ownLabel || ownLabel.contains(hit)));
+        if (hit && hit !== el && !el.contains(hit) && !hit.contains(el) && !hitInOwnLabel) {
           obscuredOrClipped.push({
             issue: 'obscured_by_overlay',
             label,
