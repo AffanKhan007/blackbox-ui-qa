@@ -139,6 +139,8 @@ python tests/smoke_test.py
 
 </details>
 
+### Repository Layout
+
 ```text
 blackbox-ui-qa/
 ├── SKILL.md                             # Core skill instructions & 3-stage loop
