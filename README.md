@@ -3,6 +3,7 @@
 **Turn any coding agent into an adversarial, evidence-backed QA engineer for web apps you can only test through the UI.**
 
 [![Version](https://img.shields.io/badge/version-2.3.0-blue)](CHANGELOG.md)
+[![CI](https://github.com/AffanKhan007/blackbox-ui-qa/actions/workflows/validate.yml/badge.svg)](https://github.com/AffanKhan007/blackbox-ui-qa/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)](requirements.txt)
 [![Live Sample Report](https://img.shields.io/badge/Live_Demo-Sample_Report-2F5597)](https://affankhan007.github.io/blackbox-ui-qa/)
