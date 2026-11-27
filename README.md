@@ -87,6 +87,8 @@ Inspect tracked sample outputs in [`examples/`](examples/README.md). To render a
 
 Supported `--host` / `-HostName` targets: `universal`, `claude`, `opencode`, `codex`, `cursor`, `windsurf`, `gemini`, `copilot`, `all`.
 
+### Depth Modes
+
 | Depth | Rigor & Coverage |
 |---|---|
 | **`Quick`** | Navigation map, passive error/layout sweep, smoke + top P0 risks (`sampled` atlas). |
